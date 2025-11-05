@@ -34,6 +34,7 @@ impl Reader {
             Some(data) => {
                 // Use pythonize for direct serde to Python conversion
                 pythonize::pythonize(py, &data)
+                    .map(|obj| obj.unbind())
                     .map_err(|e| PyValueError::new_err(format!("Conversion error: {}", e)))
             }
             None => Ok(py.None()),
@@ -44,6 +45,7 @@ impl Reader {
     fn metadata(&self, py: Python) -> PyResult<PyObject> {
         let metadata = &self.reader.metadata;
         pythonize::pythonize(py, metadata)
+            .map(|obj| obj.unbind())
             .map_err(|e| PyValueError::new_err(format!("Metadata conversion error: {}", e)))
     }
 }
