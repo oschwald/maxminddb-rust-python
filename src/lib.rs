@@ -2,187 +2,228 @@ use ::maxminddb as maxminddb_crate;
 use maxminddb_crate::{MaxMindDbError, Reader as MaxMindReader, Within, WithinItem};
 use memmap2::Mmap;
 use pyo3::{
-    exceptions::{PyFileNotFoundError, PyIOError, PyOSError, PyRuntimeError, PyTypeError, PyValueError},
+    conversion::IntoPyObjectExt,
+    exceptions::{
+        PyFileNotFoundError, PyIOError, PyOSError, PyRuntimeError, PyTypeError, PyValueError,
+    },
     prelude::*,
     types::{PyBytes, PyDict, PyList, PyModule, PyString},
-    conversion::IntoPyObjectExt,
 };
-use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
+use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 use std::{
     collections::BTreeMap,
+    fmt,
     fs::File,
     io::Read as IoRead,
     mem::transmute,
     net::IpAddr,
     path::Path,
     str::FromStr,
-    sync::{atomic::{AtomicBool, Ordering}, Arc, RwLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, RwLock,
+    },
 };
 
 // Define InvalidDatabaseError exception (subclass of RuntimeError)
-pyo3::create_exception!(maxminddb_pyo3_exceptions, InvalidDatabaseError, PyRuntimeError, "Invalid MaxMind DB");
+pyo3::create_exception!(
+    maxminddb_pyo3_exceptions,
+    InvalidDatabaseError,
+    PyRuntimeError,
+    "Invalid MaxMind DB"
+);
 
-/// Custom value type that represents all possible MaxMind DB data types
-/// This allows us to properly handle byte arrays and uint128 which aren't supported by serde_json::Value
-#[derive(Debug, Clone)]
-enum MaxMindValue {
-    Array(Vec<MaxMindValue>),
-    Boolean(bool),
-    Bytes(Vec<u8>),
-    Double(f64),
-    Float(f32),
-    Int32(i32),
-    Map(BTreeMap<String, MaxMindValue>),
-    String(String),
-    Uint16(u16),
-    Uint32(u32),
-    Uint64(u64),
-    Uint128(u128),
+/// Wrapper that owns the Python object produced by deserializing a MaxMind record
+#[derive(Debug)]
+struct PyDecodedValue {
+    value: Py<PyAny>,
 }
 
-impl MaxMindValue {
-    /// Convert MaxMindValue to Python object
-    fn to_python(&self, py: Python) -> PyResult<Py<PyAny>> {
-        match self {
-            MaxMindValue::Array(arr) => {
-                let elements: Vec<_> = arr.iter()
-                    .map(|v| v.to_python(py))
-                    .collect::<PyResult<_>>()?;
-                Ok(PyList::new(py, elements)?.into())
-            }
-            MaxMindValue::Boolean(b) => Ok(b.into_py_any(py)?),
-            MaxMindValue::Bytes(b) => {
-                // Return immutable bytes for better compatibility and performance
-                Ok(PyBytes::new(py, b).into())
-            }
-            MaxMindValue::Double(d) => Ok(d.into_py_any(py)?),
-            MaxMindValue::Float(f) => Ok(f.into_py_any(py)?),
-            MaxMindValue::Int32(i) => Ok(i.into_py_any(py)?),
-            MaxMindValue::Map(m) => {
-                let dict = PyDict::new(py);
-                for (k, v) in m {
-                    dict.set_item(k, v.to_python(py)?)?;
-                }
-                Ok(dict.into())
-            }
-            MaxMindValue::String(s) => Ok(s.as_str().into_py_any(py)?),
-            MaxMindValue::Uint16(u) => Ok(u.into_py_any(py)?),
-            MaxMindValue::Uint32(u) => Ok(u.into_py_any(py)?),
-            MaxMindValue::Uint64(u) => Ok(u.into_py_any(py)?),
-            MaxMindValue::Uint128(u) => {
-                // Python int can handle arbitrary precision integers
-                Ok(u.into_py_any(py)?)
-            }
-        }
+impl PyDecodedValue {
+    #[inline]
+    fn new(value: Py<PyAny>) -> Self {
+        Self { value }
+    }
+
+    #[inline]
+    fn into_py(self) -> Py<PyAny> {
+        self.value
     }
 }
 
-// Implement Deserialize for MaxMindValue to handle MaxMind DB data format
-impl<'de> Deserialize<'de> for MaxMindValue {
+impl<'de> Deserialize<'de> for PyDecodedValue {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        struct MaxMindValueVisitor;
-
-        impl<'de> Visitor<'de> for MaxMindValueVisitor {
-            type Value = MaxMindValue;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("any valid MaxMind DB value")
-            }
-
-            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
-                Ok(MaxMindValue::Boolean(value))
-            }
-
-            fn visit_i32<E>(self, value: i32) -> Result<Self::Value, E> {
-                Ok(MaxMindValue::Int32(value))
-            }
-
-            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                // MaxMind DB uses i32 for signed integers
-                if value >= i32::MIN as i64 && value <= i32::MAX as i64 {
-                    Ok(MaxMindValue::Int32(value as i32))
-                } else {
-                    Err(E::custom(format!("integer {} out of i32 range", value)))
-                }
-            }
-
-            fn visit_u16<E>(self, value: u16) -> Result<Self::Value, E> {
-                Ok(MaxMindValue::Uint16(value))
-            }
-
-            fn visit_u32<E>(self, value: u32) -> Result<Self::Value, E> {
-                Ok(MaxMindValue::Uint32(value))
-            }
-
-            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
-                Ok(MaxMindValue::Uint64(value))
-            }
-
-            fn visit_u128<E>(self, value: u128) -> Result<Self::Value, E> {
-                Ok(MaxMindValue::Uint128(value))
-            }
-
-            fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E> {
-                Ok(MaxMindValue::Float(value))
-            }
-
-            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E> {
-                Ok(MaxMindValue::Double(value))
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(MaxMindValue::String(value.to_owned()))
-            }
-
-            fn visit_string<E>(self, value: String) -> Result<Self::Value, E> {
-                Ok(MaxMindValue::String(value))
-            }
-
-            fn visit_bytes<E>(self, value: &[u8]) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(MaxMindValue::Bytes(value.to_owned()))
-            }
-
-            fn visit_byte_buf<E>(self, value: Vec<u8>) -> Result<Self::Value, E> {
-                Ok(MaxMindValue::Bytes(value))
-            }
-
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where
-                A: SeqAccess<'de>,
-            {
-                let mut vec = Vec::new();
-                while let Some(elem) = seq.next_element()? {
-                    vec.push(elem);
-                }
-                Ok(MaxMindValue::Array(vec))
-            }
-
-            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                let mut result = BTreeMap::new();
-                while let Some((key, value)) = map.next_entry()? {
-                    result.insert(key, value);
-                }
-                Ok(MaxMindValue::Map(result))
-            }
-        }
-
-        deserializer.deserialize_any(MaxMindValueVisitor)
+        Python::attach(|py| PyValueSeed { py }.deserialize(deserializer))
     }
+}
+
+#[derive(Copy, Clone)]
+struct PyValueSeed<'py> {
+    py: Python<'py>,
+}
+
+impl<'py> PyValueSeed<'py> {
+    #[inline]
+    fn new(py: Python<'py>) -> Self {
+        Self { py }
+    }
+}
+
+impl<'de, 'py> DeserializeSeed<'de> for PyValueSeed<'py> {
+    type Value = PyDecodedValue;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(PyValueVisitor { py: self.py })
+    }
+}
+
+struct PyValueVisitor<'py> {
+    py: Python<'py>,
+}
+
+impl<'de, 'py> Visitor<'de> for PyValueVisitor<'py> {
+    type Value = PyDecodedValue;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("any valid MaxMind DB value")
+    }
+
+    fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        bound_to_value(value.into_py_any(self.py))
+    }
+
+    fn visit_i32<E>(self, value: i32) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        bound_to_value(value.into_py_any(self.py))
+    }
+
+    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        if value >= i32::MIN as i64 && value <= i32::MAX as i64 {
+            bound_to_value((value as i32).into_py_any(self.py))
+        } else {
+            Err(E::custom(format!("integer {} out of i32 range", value)))
+        }
+    }
+
+    fn visit_u16<E>(self, value: u16) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        bound_to_value(value.into_py_any(self.py))
+    }
+
+    fn visit_u32<E>(self, value: u32) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        bound_to_value(value.into_py_any(self.py))
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        bound_to_value(value.into_py_any(self.py))
+    }
+
+    fn visit_u128<E>(self, value: u128) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        bound_to_value(value.into_py_any(self.py))
+    }
+
+    fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        bound_to_value(value.into_py_any(self.py))
+    }
+
+    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        bound_to_value(value.into_py_any(self.py))
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        bound_to_value(value.into_py_any(self.py))
+    }
+
+    fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        bound_to_value(value.into_py_any(self.py))
+    }
+
+    fn visit_bytes<E>(self, value: &[u8]) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let py_bytes = PyBytes::new(self.py, value);
+        Ok(PyDecodedValue::new(py_bytes.into_any().unbind()))
+    }
+
+    fn visit_byte_buf<E>(self, value: Vec<u8>) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let py_bytes = PyBytes::new(self.py, &value);
+        Ok(PyDecodedValue::new(py_bytes.into_any().unbind()))
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let capacity = seq.size_hint().unwrap_or(0);
+        let mut elements = Vec::with_capacity(capacity);
+        while let Some(elem) = seq.next_element_seed(PyValueSeed::new(self.py))? {
+            elements.push(elem.into_py());
+        }
+        let py_list = PyList::new(self.py, elements).map_err(pyerr_to_de_error)?;
+        Ok(PyDecodedValue::new(py_list.into_any().unbind()))
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let dict = PyDict::new(self.py);
+        while let Some(key) = map.next_key::<String>()? {
+            let value = map.next_value_seed(PyValueSeed::new(self.py))?;
+            dict.set_item(key, value.into_py())
+                .map_err(pyerr_to_de_error)?;
+        }
+        Ok(PyDecodedValue::new(dict.into_any().unbind()))
+    }
+}
+
+fn pyerr_to_de_error<E: de::Error>(err: PyErr) -> E {
+    E::custom(err.to_string())
+}
+
+fn bound_to_value<E: de::Error>(result: PyResult<Py<PyAny>>) -> Result<PyDecodedValue, E> {
+    result.map(PyDecodedValue::new).map_err(pyerr_to_de_error)
 }
 
 // Mode constants matching original maxminddb module
@@ -195,7 +236,8 @@ const MODE_FD: i32 = 16;
 
 // Error message constants
 const ERR_CLOSED_DB: &str = "Attempt to read from a closed MaxMind DB.";
-const ERR_BAD_DATA: &str = "The MaxMind DB file's data section contains bad data (unknown data type or corrupt data)";
+const ERR_BAD_DATA: &str =
+    "The MaxMind DB file's data section contains bad data (unknown data type or corrupt data)";
 
 /// Enum to handle different reader source types
 enum ReaderSource {
@@ -205,7 +247,10 @@ enum ReaderSource {
 
 impl ReaderSource {
     #[inline]
-    fn lookup(&self, ip: IpAddr) -> Result<Option<MaxMindValue>, maxminddb_crate::MaxMindDbError> {
+    fn lookup(
+        &self,
+        ip: IpAddr,
+    ) -> Result<Option<PyDecodedValue>, maxminddb_crate::MaxMindDbError> {
         match self {
             ReaderSource::Mmap(reader) => reader.lookup(ip),
             ReaderSource::Memory(reader) => reader.lookup(ip),
@@ -213,7 +258,10 @@ impl ReaderSource {
     }
 
     #[inline]
-    fn lookup_prefix(&self, ip: IpAddr) -> Result<(Option<MaxMindValue>, usize), maxminddb_crate::MaxMindDbError> {
+    fn lookup_prefix(
+        &self,
+        ip: IpAddr,
+    ) -> Result<(Option<PyDecodedValue>, usize), maxminddb_crate::MaxMindDbError> {
         match self {
             ReaderSource::Mmap(reader) => reader.lookup_prefix(ip),
             ReaderSource::Memory(reader) => reader.lookup_prefix(ip),
@@ -227,7 +275,6 @@ impl ReaderSource {
             ReaderSource::Memory(reader) => &reader.metadata,
         }
     }
-
 }
 
 /// Metadata about the MaxMind DB database
@@ -266,7 +313,8 @@ impl Metadata {
     #[getter]
     fn languages(&self, py: Python) -> PyResult<Py<PyAny>> {
         // Convert Vec<String> to Python list
-        self.languages_list.clone().into_py_any(py)
+        let list = PyList::new(py, &self.languages_list)?;
+        Ok(list.into_any().unbind())
     }
 
     #[getter]
@@ -311,7 +359,7 @@ impl Reader {
 
         // Determine which mode to use
         let actual_mode = if mode == MODE_AUTO {
-            MODE_MMAP  // Default to mmap for best performance
+            MODE_MMAP // Default to mmap for best performance
         } else {
             mode
         };
@@ -321,10 +369,10 @@ impl Reader {
             MODE_MMAP | MODE_MMAP_EXT => open_database_mmap(&path),
             MODE_MEMORY => open_database_memory(&path),
             MODE_FILE => Err(PyValueError::new_err(
-                "MODE_FILE not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY"
+                "MODE_FILE not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY",
             )),
             MODE_FD => Err(PyValueError::new_err(
-                "MODE_FD not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY"
+                "MODE_FD not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY",
             )),
             _ => Err(PyValueError::new_err(format!(
                 "Unsupported open mode ({actual_mode})"
@@ -357,7 +405,7 @@ impl Reader {
         let lookup_result = py.detach(|| reader.lookup(parsed_ip.addr));
 
         match lookup_result {
-            Ok(Some(data)) => data.to_python(py),
+            Ok(Some(data)) => Ok(data.into_py()),
             Ok(None) => Ok(py.None()),
             Err(MaxMindDbError::InvalidDatabase(_) | MaxMindDbError::Decoding(_)) => {
                 Err(InvalidDatabaseError::new_err(ERR_BAD_DATA))
@@ -390,7 +438,7 @@ impl Reader {
 
         match result {
             Ok((Some(data), prefix_len)) => {
-                let py_obj = data.to_python(py)?;
+                let py_obj = data.into_py();
                 Ok((py_obj, prefix_len))
             }
             Ok((None, prefix_len)) => Ok((py.None(), prefix_len)),
@@ -425,13 +473,13 @@ impl Reader {
         let reader = self.get_reader()?;
 
         // Release GIL during all lookups
-        let results: Vec<Result<Option<MaxMindValue>, MaxMindDbError>> =
+        let results: Vec<Result<Option<PyDecodedValue>, MaxMindDbError>> =
             py.detach(|| parsed_ips.iter().map(|ip| reader.lookup(*ip)).collect());
 
         let mut objects = Vec::with_capacity(results.len());
         for result in results {
             match result {
-                Ok(Some(data)) => objects.push(data.to_python(py)?),
+                Ok(Some(data)) => objects.push(data.into_py()),
                 Ok(None) => objects.push(py.None()),
                 Err(MaxMindDbError::InvalidDatabase(_) | MaxMindDbError::Decoding(_)) => {
                     return Err(InvalidDatabaseError::new_err(ERR_BAD_DATA));
@@ -452,7 +500,9 @@ impl Reader {
             return Err(PyOSError::new_err(ERR_CLOSED_DB));
         }
 
-        let reader = self.get_reader().map_err(|_| PyOSError::new_err(ERR_CLOSED_DB))?;
+        let reader = self
+            .get_reader()
+            .map_err(|_| PyOSError::new_err(ERR_CLOSED_DB))?;
 
         let meta = reader.metadata();
 
@@ -483,7 +533,9 @@ impl Reader {
         // Check if database is closed
         let is_closed = slf.borrow(py).closed.load(Ordering::Acquire);
         if is_closed {
-            return Err(PyValueError::new_err("Attempt to reopen a closed MaxMind DB"));
+            return Err(PyValueError::new_err(
+                "Attempt to reopen a closed MaxMind DB",
+            ));
         }
         Ok(slf)
     }
@@ -544,15 +596,16 @@ impl ReaderIterator {
             ("::/0", "IPv6")
         };
 
-        let network = ipnetwork::IpNetwork::from_str(network_str)
-            .map_err(|e| InvalidDatabaseError::new_err(
-                format!("Failed to create {} network: {}", network_type, e)
-            ))?;
+        let network = ipnetwork::IpNetwork::from_str(network_str).map_err(|e| {
+            InvalidDatabaseError::new_err(format!(
+                "Failed to create {} network: {}",
+                network_type, e
+            ))
+        })?;
 
-        let iter = ReaderWithin::new(&reader, network)
-            .map_err(|e| InvalidDatabaseError::new_err(
-                format!("Failed to iterate {}: {}", network_type, e)
-            ))?;
+        let iter = ReaderWithin::new(&reader, network).map_err(|e| {
+            InvalidDatabaseError::new_err(format!("Failed to iterate {}: {}", network_type, e))
+        })?;
 
         let ipaddress = py.import("ipaddress")?;
         let ipv4_network_cls = ipaddress.getattr("IPv4Network")?.unbind();
@@ -575,7 +628,8 @@ impl ReaderIterator {
 
     fn __next__(&mut self, py: Python) -> PyResult<Option<(Py<PyAny>, Py<PyAny>)>> {
         let next_item = match self.iter.next() {
-            Some(result) => result.map_err(|e| InvalidDatabaseError::new_err(format!("Iteration error: {}", e)))?,
+            Some(result) => result
+                .map_err(|e| InvalidDatabaseError::new_err(format!("Iteration error: {}", e)))?,
             None => return Ok(None),
         };
 
@@ -586,36 +640,41 @@ impl ReaderIterator {
         };
         let network_obj = class.call1((network_str,))?;
 
-        // Convert data to Python object
-        let data_obj = next_item.info.to_python(py)?;
+        // Record is already materialized as a Python object
+        let data_obj = next_item.info.into_py();
 
         Ok(Some((network_obj.unbind(), data_obj)))
     }
 }
 
 enum ReaderWithin {
-    Mmap(Within<'static, MaxMindValue, Mmap>),
-    Memory(Within<'static, MaxMindValue, Vec<u8>>),
+    Mmap(Within<'static, PyDecodedValue, Mmap>),
+    Memory(Within<'static, PyDecodedValue, Vec<u8>>),
 }
 
 impl ReaderWithin {
-    fn new(reader: &Arc<ReaderSource>, network: ipnetwork::IpNetwork) -> Result<Self, maxminddb_crate::MaxMindDbError> {
+    fn new(
+        reader: &Arc<ReaderSource>,
+        network: ipnetwork::IpNetwork,
+    ) -> Result<Self, maxminddb_crate::MaxMindDbError> {
         match reader.as_ref() {
             ReaderSource::Mmap(inner) => {
-                let iter = inner.within::<MaxMindValue>(network)?;
+                let iter = inner.within::<PyDecodedValue>(network)?;
                 // SAFETY: the iterator holds a reference into `inner`. We store an Arc guard
                 // alongside it so the reader outlives the transmuted iterator.
                 Ok(Self::Mmap(unsafe { transmute(iter) }))
             }
             ReaderSource::Memory(inner) => {
-                let iter = inner.within::<MaxMindValue>(network)?;
+                let iter = inner.within::<PyDecodedValue>(network)?;
                 // SAFETY: same as above, the Arc guard in `ReaderIterator` keeps the reader alive.
                 Ok(Self::Memory(unsafe { transmute(iter) }))
             }
         }
     }
 
-    fn next(&mut self) -> Option<Result<WithinItem<MaxMindValue>, maxminddb_crate::MaxMindDbError>> {
+    fn next(
+        &mut self,
+    ) -> Option<Result<WithinItem<PyDecodedValue>, maxminddb_crate::MaxMindDbError>> {
         match self {
             ReaderWithin::Mmap(iter) => iter.next(),
             ReaderWithin::Memory(iter) => iter.next(),
@@ -634,7 +693,10 @@ fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<ParsedIp> {
     if let Ok(py_str) = ip_address.cast::<PyString>() {
         let s = py_str.to_str()?;
         let addr = s.parse().map_err(|_| {
-            PyValueError::new_err(format!("'{}' does not appear to be an IPv4 or IPv6 address", s))
+            PyValueError::new_err(format!(
+                "'{}' does not appear to be an IPv4 or IPv6 address",
+                s
+            ))
         })?;
         return Ok(ParsedIp { addr });
     }
@@ -654,16 +716,17 @@ fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<ParsedIp> {
 /// Helper function to generate IPv6-in-IPv4 error message
 #[inline]
 fn ipv6_in_ipv4_error(ip: &IpAddr) -> String {
-    format!("Error looking up {}. You attempted to look up an IPv6 address in an IPv4-only database", ip)
+    format!(
+        "Error looking up {}. You attempted to look up an IPv6 address in an IPv4-only database",
+        ip
+    )
 }
 
 /// Helper function to open a file with appropriate error handling
 fn open_file(path: &str) -> PyResult<File> {
-    File::open(Path::new(path)).map_err(|e| {
-        match e.kind() {
-            std::io::ErrorKind::NotFound => PyFileNotFoundError::new_err(e.to_string()),
-            _ => PyIOError::new_err(e.to_string()),
-        }
+    File::open(Path::new(path)).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => PyFileNotFoundError::new_err(e.to_string()),
+        _ => PyIOError::new_err(e.to_string()),
     })
 }
 
@@ -691,8 +754,12 @@ fn open_database_mmap(path: &str) -> PyResult<Reader> {
                 })?
             };
 
-            MaxMindReader::from_source(mmap)
-                .map_err(|_| InvalidDatabaseError::new_err(format!("Error opening database file ({}). Is this a valid MaxMind DB file?", path)))
+            MaxMindReader::from_source(mmap).map_err(|_| {
+                InvalidDatabaseError::new_err(format!(
+                    "Error opening database file ({}). Is this a valid MaxMind DB file?",
+                    path
+                ))
+            })
         })
     })?;
 
@@ -707,12 +774,15 @@ fn open_database_memory(path: &str) -> PyResult<Reader> {
             let mut file = open_file(path)?;
 
             let mut buffer = Vec::new();
-            file.read_to_end(&mut buffer).map_err(|e| {
-                PyIOError::new_err(format!("Failed to read database file: {e}"))
-            })?;
+            file.read_to_end(&mut buffer)
+                .map_err(|e| PyIOError::new_err(format!("Failed to read database file: {e}")))?;
 
-            MaxMindReader::from_source(buffer)
-                .map_err(|_| InvalidDatabaseError::new_err(format!("Error opening database file ({}). Is this a valid MaxMind DB file?", path)))
+            MaxMindReader::from_source(buffer).map_err(|_| {
+                InvalidDatabaseError::new_err(format!(
+                    "Error opening database file ({}). Is this a valid MaxMind DB file?",
+                    path
+                ))
+            })
         })
     })?;
 
@@ -734,7 +804,10 @@ fn maxminddb(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Metadata>()?;
 
     // Add exception
-    m.add("InvalidDatabaseError", _py.get_type::<InvalidDatabaseError>())?;
+    m.add(
+        "InvalidDatabaseError",
+        _py.get_type::<InvalidDatabaseError>(),
+    )?;
 
     // Add function
     m.add_function(wrap_pyfunction!(open_database, m)?)?;
