@@ -807,12 +807,21 @@ impl ReaderWithin {
                 let iter = inner.within::<PyDecodedValue>(network)?;
                 // SAFETY: the iterator holds a reference into `inner`. We store an Arc guard
                 // alongside it so the reader outlives the transmuted iterator.
-                Ok(Self::Mmap(unsafe { transmute(iter) }))
+                Ok(Self::Mmap(unsafe {
+                    transmute::<Within<'_, PyDecodedValue, Mmap>, Within<'_, PyDecodedValue, Mmap>>(
+                        iter,
+                    )
+                }))
             }
             ReaderSource::Memory(inner) => {
                 let iter = inner.within::<PyDecodedValue>(network)?;
                 // SAFETY: same as above, the Arc guard in `ReaderIterator` keeps the reader alive.
-                Ok(Self::Memory(unsafe { transmute(iter) }))
+                Ok(Self::Memory(unsafe {
+                    transmute::<
+                        Within<'_, PyDecodedValue, Vec<u8>>,
+                        Within<'_, PyDecodedValue, Vec<u8>>,
+                    >(iter)
+                }))
             }
         }
     }
