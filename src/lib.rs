@@ -493,8 +493,13 @@ impl Reader {
     }
 
     /// Context manager entry
-    fn __enter__(slf: Py<Self>) -> Py<Self> {
-        slf
+    fn __enter__(slf: Py<Self>, py: Python) -> PyResult<Py<Self>> {
+        // Check if database is closed
+        let is_closed = slf.borrow(py).closed.load(Ordering::Acquire);
+        if is_closed {
+            return Err(PyValueError::new_err("Attempt to reopen a closed MaxMind DB"));
+        }
+        Ok(slf)
     }
 
     /// Context manager exit
