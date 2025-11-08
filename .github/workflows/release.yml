@@ -105,4 +105,4 @@ jobs:
           merge-multiple: true
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@c03e7fc4fb68e760409a4eb05a41050da01d8412 # v1.13.0
+        uses: pypa/gh-action-pypi-publish@67339c736fd9354cd4f8cb0b744f2b82a74b5c70 # v1.13.0
