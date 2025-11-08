@@ -1,0 +1,88 @@
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.whl
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# UV cache
+.uv-cache/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
+
+# Profiling
+*.pstats
+perf.data
+perf.data.old
+*.svg
+profile_*.json
+profile_*.txt
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Vim
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Personal notes
+todo.md
+TODO.md
+notes.md
+NOTES.md
+
+# Claude Code
+.claude/
+
+# Maturin
+.cargo/
+
+# PyO3
+*.so
+
+# Benchmarking outputs
+*.json
+*.svg
+perf.data*
