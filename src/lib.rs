@@ -8,6 +8,7 @@ use pyo3::{
 };
 use std::collections::BTreeMap;
 use std::fs::File;
+use std::io::Read as IoRead;
 use std::net::IpAddr;
 use std::path::Path;
 use std::str::FromStr;
@@ -23,6 +24,55 @@ const MODE_MMAP: i32 = 2;
 const MODE_FILE: i32 = 4;
 const MODE_MEMORY: i32 = 8;
 const MODE_FD: i32 = 16;
+
+/// Enum to handle different reader source types
+enum ReaderSource {
+    Mmap(MaxMindReader<Mmap>),
+    Memory(MaxMindReader<Vec<u8>>),
+}
+
+impl ReaderSource {
+    fn lookup(&self, ip: IpAddr) -> Result<Option<serde_json::Value>, maxminddb_crate::MaxMindDbError> {
+        match self {
+            ReaderSource::Mmap(reader) => reader.lookup(ip),
+            ReaderSource::Memory(reader) => reader.lookup(ip),
+        }
+    }
+
+    fn lookup_prefix(&self, ip: IpAddr) -> Result<(Option<serde_json::Value>, usize), maxminddb_crate::MaxMindDbError> {
+        match self {
+            ReaderSource::Mmap(reader) => reader.lookup_prefix(ip),
+            ReaderSource::Memory(reader) => reader.lookup_prefix(ip),
+        }
+    }
+
+    fn metadata(&self) -> &maxminddb_crate::Metadata {
+        match self {
+            ReaderSource::Mmap(reader) => &reader.metadata,
+            ReaderSource::Memory(reader) => &reader.metadata,
+        }
+    }
+
+    /// Collect all items within a network range
+    fn collect_within(&self, network: ipnetwork::IpNetwork) -> Result<Vec<(ipnetwork::IpNetwork, serde_json::Value)>, maxminddb_crate::MaxMindDbError> {
+        let mut items = Vec::new();
+        match self {
+            ReaderSource::Mmap(reader) => {
+                for result in reader.within(network)? {
+                    let item = result?;
+                    items.push((item.ip_net, item.info));
+                }
+            }
+            ReaderSource::Memory(reader) => {
+                for result in reader.within(network)? {
+                    let item = result?;
+                    items.push((item.ip_net, item.info));
+                }
+            }
+        }
+        Ok(items)
+    }
+}
 
 /// Metadata about the MaxMind DB database
 #[pyclass]
@@ -73,10 +123,10 @@ impl Metadata {
 }
 
 /// A Python wrapper around the MaxMind DB reader.
-/// Uses memory-mapped files for improved performance.
+/// Supports both memory-mapped files (MODE_MMAP) and in-memory (MODE_MEMORY) modes.
 #[pyclass]
 struct Reader {
-    reader: Arc<Mutex<Option<Arc<MaxMindReader<Mmap>>>>>,
+    reader: Arc<Mutex<Option<Arc<ReaderSource>>>>,
     closed: Arc<AtomicBool>,
 }
 
@@ -100,14 +150,27 @@ impl Reader {
             }
         };
 
-        // Validate mode (currently only support MODE_AUTO and MODE_MMAP)
-        if mode != MODE_AUTO && mode != MODE_MMAP {
-            return Err(PyValueError::new_err(format!(
-                "Mode {mode} not yet supported, using MODE_MMAP"
-            )));
-        }
+        // Determine which mode to use
+        let actual_mode = if mode == MODE_AUTO {
+            MODE_MMAP  // Default to mmap for best performance
+        } else {
+            mode
+        };
 
-        open_database_internal(&path)
+        // Validate and open database with appropriate mode
+        match actual_mode {
+            MODE_MMAP | MODE_MMAP_EXT => open_database_mmap(&path),
+            MODE_MEMORY => open_database_memory(&path),
+            MODE_FILE => Err(PyValueError::new_err(
+                "MODE_FILE not yet supported, use MODE_MMAP or MODE_MEMORY"
+            )),
+            MODE_FD => Err(PyValueError::new_err(
+                "MODE_FD not yet supported, use MODE_MMAP or MODE_MEMORY"
+            )),
+            _ => Err(PyValueError::new_err(format!(
+                "Unknown mode {actual_mode}, use MODE_MMAP or MODE_MEMORY"
+            ))),
+        }
     }
 
     #[getter]
@@ -176,7 +239,7 @@ impl Reader {
             };
 
             // Perform lookup with prefix length (no lock needed - reader is thread-safe)
-            match reader.lookup_prefix::<serde_json::Value>(ip_addr) {
+            match reader.lookup_prefix(ip_addr) {
                 Ok((Some(data), prefix)) => (Some(data), prefix),
                 Ok((None, _)) => (None, 0),
                 Err(_) => (None, 0),
@@ -245,7 +308,7 @@ impl Reader {
         let reader_opt = self.reader.lock().unwrap().clone();
         let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Database is closed"))?;
 
-        let meta = &reader.metadata;
+        let meta = reader.metadata();
 
         Ok(Metadata {
             binary_format_major_version: meta.binary_format_major_version,
@@ -305,7 +368,7 @@ struct ReaderIterator {
 }
 
 impl ReaderIterator {
-    fn new(reader: Arc<MaxMindReader<Mmap>>) -> PyResult<Self> {
+    fn new(reader: Arc<ReaderSource>) -> PyResult<Self> {
         // Collect all items from both IPv4 and IPv6 networks
         let mut items = Vec::new();
 
@@ -313,27 +376,17 @@ impl ReaderIterator {
         let ipv4_net = ipnetwork::IpNetwork::from_str("0.0.0.0/0")
             .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to create IPv4 network: {e}")))?;
 
-        for result in reader.within(ipv4_net)
-            .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to create IPv4 iterator: {e}")))?
-        {
-            match result {
-                Ok(item) => items.push((item.ip_net, item.info)),
-                Err(e) => return Err(InvalidDatabaseError::new_err(format!("Iterator error: {e}"))),
-            }
-        }
+        let mut ipv4_items = reader.collect_within(ipv4_net)
+            .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to iterate IPv4: {e}")))?;
+        items.append(&mut ipv4_items);
 
         // IPv6: ::/0
         let ipv6_net = ipnetwork::IpNetwork::from_str("::/0")
             .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to create IPv6 network: {e}")))?;
 
-        for result in reader.within(ipv6_net)
-            .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to create IPv6 iterator: {e}")))?
-        {
-            match result {
-                Ok(item) => items.push((item.ip_net, item.info)),
-                Err(e) => return Err(InvalidDatabaseError::new_err(format!("Iterator error: {e}"))),
-            }
-        }
+        let mut ipv6_items = reader.collect_within(ipv6_net)
+            .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to iterate IPv6: {e}")))?;
+        items.append(&mut ipv6_items);
 
         Ok(Self {
             items,
@@ -395,8 +448,8 @@ fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<String> {
     ))
 }
 
-/// Internal function to open a MaxMind DB from a file path
-fn open_database_internal(path: &str) -> PyResult<Reader> {
+/// Open a MaxMind DB using memory-mapped files (MODE_MMAP)
+fn open_database_mmap(path: &str) -> PyResult<Reader> {
     // Release GIL during file I/O operation
     let reader = Python::with_gil(|py| {
         py.allow_threads(|| {
@@ -418,7 +471,33 @@ fn open_database_internal(path: &str) -> PyResult<Reader> {
     })?;
 
     Ok(Reader {
-        reader: Arc::new(Mutex::new(Some(Arc::new(reader)))),
+        reader: Arc::new(Mutex::new(Some(Arc::new(ReaderSource::Mmap(reader))))),
+        closed: Arc::new(AtomicBool::new(false)),
+    })
+}
+
+/// Open a MaxMind DB by loading entire file into memory (MODE_MEMORY)
+fn open_database_memory(path: &str) -> PyResult<Reader> {
+    // Release GIL during file I/O operation
+    let reader = Python::with_gil(|py| {
+        py.allow_threads(|| {
+            // Open file and read entire contents into memory
+            let mut file = File::open(Path::new(path)).map_err(|e| {
+                InvalidDatabaseError::new_err(format!("Failed to open database file: {e}"))
+            })?;
+
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer).map_err(|e| {
+                InvalidDatabaseError::new_err(format!("Failed to read database file: {e}"))
+            })?;
+
+            MaxMindReader::from_source(buffer)
+                .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to open database: {e}")))
+        })
+    })?;
+
+    Ok(Reader {
+        reader: Arc::new(Mutex::new(Some(Arc::new(ReaderSource::Memory(reader))))),
         closed: Arc::new(AtomicBool::new(false)),
     })
 }

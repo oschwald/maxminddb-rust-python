@@ -43,7 +43,7 @@ This package provides a **drop-in replacement** for the [`maxminddb`](https://gi
 - ⭐ `get_many()` - Batch lookup method for processing multiple IPs efficiently
 
 **Not Yet Implemented:**
-- ⏸️ MODE_FILE and MODE_MEMORY modes (currently only MODE_AUTO and MODE_MMAP supported)
+- ⏸️ MODE_FILE mode (currently only MODE_AUTO, MODE_MMAP, and MODE_MEMORY supported)
 - ⏸️ File descriptor support in constructor
 
 ## Installation
@@ -123,6 +123,23 @@ reader = maxminddb.open_database("/var/lib/GeoIP/GeoLite2-Country.mmdb")
 # Iterate over all networks in the database
 for network, data in reader:
     print(f"{network}: {data['country']['iso_code']}")
+```
+
+### Database Modes
+
+Choose between memory-mapped files (default, best performance) and in-memory mode:
+
+```python
+import maxminddb
+
+# MODE_AUTO: Uses memory-mapped files (default, fastest)
+reader = maxminddb.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb.MODE_AUTO)
+
+# MODE_MMAP: Explicitly use memory-mapped files
+reader = maxminddb.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb.MODE_MMAP)
+
+# MODE_MEMORY: Load entire database into memory (useful for embedded systems or when file handle limits are a concern)
+reader = maxminddb.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb.MODE_MEMORY)
 ```
 
 ## Benchmarking
