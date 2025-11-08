@@ -221,7 +221,9 @@ class Reader:
         """
         ...
 
-    def __iter__(self) -> Iterator[tuple[Union[IPv4Network, IPv6Network], dict[str, Any]]]:
+    def __iter__(
+        self,
+    ) -> Iterator[tuple[Union[IPv4Network, IPv6Network], dict[str, Any]]]:
         """
         Iterate over all networks in the database.
 
@@ -237,9 +239,7 @@ class Reader:
         """
         ...
 
-def open_database(
-    database: Union[str, PathLike[str]], mode: int = MODE_AUTO
-) -> Reader:
+def open_database(database: Union[str, PathLike[str]], mode: int = MODE_AUTO) -> Reader:
     """
     Open a MaxMind DB database file.
 

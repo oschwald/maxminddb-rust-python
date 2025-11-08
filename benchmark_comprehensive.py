@@ -11,9 +11,11 @@ import struct
 import timeit
 import maxminddb_rust
 
+
 def format_number(n):
     """Format number with thousands separator."""
     return f"{int(n):,}"
+
 
 def run_benchmark(file_path, count, description):
     """Run a single benchmark and return results."""
@@ -37,9 +39,12 @@ def run_benchmark(file_path, count, description):
     print(f"{description:50s} {format_number(lookups_per_sec):>15s} lookups/sec")
     return lookups_per_sec
 
+
 def main():
     parser = argparse.ArgumentParser(description="Comprehensive maxminddb benchmarks")
-    parser.add_argument("--count", default=250000, type=int, help="number of lookups per test")
+    parser.add_argument(
+        "--count", default=250000, type=int, help="number of lookups per test"
+    )
     args = parser.parse_args()
 
     print("=" * 70)
@@ -69,6 +74,7 @@ def main():
         avg_lookups = sum(r[1] for r in results) / len(results)
         print(f"Average performance: {format_number(avg_lookups)} lookups/sec")
         print("=" * 70)
+
 
 if __name__ == "__main__":
     main()

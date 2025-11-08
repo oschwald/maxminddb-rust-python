@@ -5,6 +5,7 @@ This guide explains how to migrate from the official `maxminddb` package to `max
 ## Why Migrate?
 
 `maxminddb-rust` offers significant performance improvements over the official `maxminddb` package:
+
 - **45% faster** on average (373K vs 257K lookups/second)
 - Same API, just better performance
 - All features supported (except MODE_FILE and MODE_FD)
@@ -15,6 +16,7 @@ This guide explains how to migrate from the official `maxminddb` package to `max
 The only change required is updating your import statement:
 
 ### Before (official maxminddb)
+
 ```python
 import maxminddb
 
@@ -23,6 +25,7 @@ result = reader.get('8.8.8.8')
 ```
 
 ### After (maxminddb-rust)
+
 ```python
 import maxminddb_rust
 
@@ -37,6 +40,7 @@ That's it! All other code remains identical.
 ### Option 1: Find and Replace
 
 Replace all occurrences in your codebase:
+
 - `import maxminddb` → `import maxminddb_rust`
 - `maxminddb.` → `maxminddb_rust.` (within your code)
 
@@ -88,6 +92,7 @@ pip install maxminddb-rust
 ```
 
 Then explicitly choose in your code:
+
 ```python
 import maxminddb_rust  # Use Rust implementation
 import maxminddb       # Use official implementation (if still needed)
@@ -98,6 +103,7 @@ import maxminddb       # Use official implementation (if still needed)
 ### Fully Compatible Features
 
 ✅ **100% compatible** - No code changes needed:
+
 - `Reader` class and all methods
 - `open_database()` function
 - `get()`, `get_with_prefix_len()`, `metadata()`, `close()`
@@ -111,11 +117,13 @@ import maxminddb       # Use official implementation (if still needed)
 ### Extension Features
 
 ⭐ **Bonus features** in `maxminddb-rust`:
+
 - `get_many()` - Batch IP lookup method (not in official package)
 
 ### Not Yet Implemented
 
 ⏸️ These modes are not yet supported in `maxminddb-rust`:
+
 - MODE_FILE (use MODE_MMAP or MODE_MEMORY instead)
 - MODE_FD (file descriptor mode)
 
@@ -163,16 +171,17 @@ def lookup():
 
 After migration, you should see performance improvements:
 
-| Operation | Official maxminddb | maxminddb-rust | Improvement |
-|-----------|-------------------|----------------|-------------|
-| Single lookup | ~260K ops/sec | ~373K ops/sec | +45% |
-| Batch (get_many) | N/A | ~500K+ ops/sec | New feature |
+| Operation        | Official maxminddb | maxminddb-rust | Improvement |
+| ---------------- | ------------------ | -------------- | ----------- |
+| Single lookup    | ~260K ops/sec      | ~373K ops/sec  | +45%        |
+| Batch (get_many) | N/A                | ~500K+ ops/sec | New feature |
 
 ## Troubleshooting
 
 ### ImportError: No module named 'maxminddb_rust'
 
 Make sure the package is installed:
+
 ```bash
 pip install maxminddb-rust
 ```
@@ -180,6 +189,7 @@ pip install maxminddb-rust
 ### Both packages installed, wrong one being used
 
 Check which one is imported:
+
 ```python
 import maxminddb_rust
 print(maxminddb_rust.__file__)
@@ -188,6 +198,7 @@ print(maxminddb_rust.__file__)
 ### Tests failing after migration
 
 Update test imports:
+
 ```python
 # Before
 import maxminddb
@@ -212,6 +223,7 @@ pip install maxminddb
 ```
 
 Then revert your import changes:
+
 ```python
 # Change back
 import maxminddb  # Official package
@@ -219,17 +231,17 @@ import maxminddb  # Official package
 
 ## Comparison Table
 
-| Feature | Official maxminddb | maxminddb-rust |
-|---------|-------------------|----------------|
-| Package name | `maxminddb` | `maxminddb-rust` |
-| Import name | `import maxminddb` | `import maxminddb_rust` |
-| Performance | Baseline | 45% faster |
-| Implementation | Pure Python + C | Rust (PyO3) |
-| API compatibility | N/A | 100% |
-| get_many() | ❌ | ✅ |
-| MODE_FILE | ✅ | ❌ (use MODE_MMAP) |
-| MODE_FD | ✅ | ❌ (not yet) |
-| Maintained by | MaxMind (official) | Community (unofficial) |
+| Feature           | Official maxminddb | maxminddb-rust          |
+| ----------------- | ------------------ | ----------------------- |
+| Package name      | `maxminddb`        | `maxminddb-rust`        |
+| Import name       | `import maxminddb` | `import maxminddb_rust` |
+| Performance       | Baseline           | 45% faster              |
+| Implementation    | Pure Python + C    | Rust (PyO3)             |
+| API compatibility | N/A                | 100%                    |
+| get_many()        | ❌                 | ✅                      |
+| MODE_FILE         | ✅                 | ❌ (use MODE_MMAP)      |
+| MODE_FD           | ✅                 | ❌ (not yet)            |
+| Maintained by     | MaxMind (official) | Community (unofficial)  |
 
 ## FAQ
 

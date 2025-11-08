@@ -499,14 +499,12 @@ class BaseTestReader(unittest.TestCase):
         reader = open_database(filename, self.mode)
         reader.close()
 
-        with (
-            self.assertRaisesRegex(
-                ValueError,
-                "Attempt to reopen a closed MaxMind DB",
-            ),
-            reader,
+        with self.assertRaisesRegex(
+            ValueError,
+            "Attempt to reopen a closed MaxMind DB",
         ):
-            pass
+            with reader:
+                pass
 
     def test_closed(self) -> None:
         reader = open_database(

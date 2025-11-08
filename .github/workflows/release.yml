@@ -1,0 +1,108 @@
+---
+name: Release
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64
+          - os: ubuntu-latest
+            target: aarch64
+          - os: macos-latest
+            target: x86_64
+          - os: macos-latest
+            target: aarch64
+          - os: windows-latest
+            target: x86_64
+          - os: windows-latest
+            target: aarch64
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.x"
+
+      - name: Install maturin
+        run: pip install maturin
+
+      - name: Set up QEMU
+        if: runner.os == 'Linux' && matrix.target == 'aarch64'
+        uses: docker/setup-qemu-action@29109295f81f6ebc7c53c7074e4910c3e6c0d0c2 # v3.3.0
+        with:
+          platforms: arm64
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@0bdcfedeb2f8c18bb0f6deb2c1107f090c987adc # v1.48.0
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --interpreter 3.9 3.10 3.11 3.12 3.13 3.14
+          sccache: "true"
+          manylinux: auto
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@ea054f79f8bb44bf3221c1d8093e6ced4e2bae6e # v4.5.0
+        with:
+          name: maxminddb-rust-whl-${{ matrix.os }}-${{ matrix.target }}
+          path: dist
+
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@0bdcfedeb2f8c18bb0f6deb2c1107f090c987adc # v1.48.0
+        with:
+          command: sdist
+          args: --out dist
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@ea054f79f8bb44bf3221c1d8093e6ced4e2bae6e # v4.5.0
+        with:
+          name: maxminddb-rust-sdist
+          path: dist
+
+  upload_pypi:
+    name: Publish to PyPI
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && github.event.action == 'published'
+    environment: release
+    permissions:
+      id-token: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc0ff # v4.2.0
+        with:
+          pattern: maxminddb-rust-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@67339c736fd9354cd4f8cb0b744f2b82a74b5c70 # v1.12.2

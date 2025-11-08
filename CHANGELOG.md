@@ -10,12 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - Initial Release
 
 ### Added
+
 - High-performance Rust-based Python module for MaxMind DB files
 - 100% API compatibility with the official `maxminddb` Python package
   - `Reader` class with `get()`, `get_with_prefix_len()`, `metadata()`, and `close()` methods
   - `open_database()` function
   - Context manager support (`with` statement)
-  - MODE_* constants (MODE_AUTO, MODE_MMAP, MODE_MMAP_EXT, MODE_MEMORY)
+  - MODE\_\* constants (MODE_AUTO, MODE_MMAP, MODE_MMAP_EXT, MODE_MEMORY)
   - `InvalidDatabaseError` exception
   - `Metadata` class with all attributes and computed properties
   - Support for string IP addresses and `ipaddress.IPv4Address`/`IPv6Address` objects
@@ -35,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - This CHANGELOG file
 
 ### Performance
+
 - 45% faster average performance: 373K lookups/second vs official package
   - GeoLite2-Country: 493K lookups/sec
   - GeoLite2-City: 319K lookups/sec
@@ -48,16 +50,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Batch processing support with `get_many()`
 
 ### Supported Modes
+
 - MODE_AUTO: Automatically choose the best mode (uses MODE_MMAP)
 - MODE_MMAP: Memory-mapped file I/O (default, best performance)
 - MODE_MMAP_EXT: Same as MODE_MMAP
 - MODE_MEMORY: Load entire database into memory
 
 ### Not Yet Implemented
+
 - MODE_FILE: Read database as standard file
 - MODE_FD: Load from file descriptor
 
 ### Dependencies
+
 - PyO3 0.27.1: Python bindings for Rust
 - maxminddb 0.26.0: MaxMind DB file format reader
 - memmap2 0.9: Memory mapping
@@ -65,6 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - serde 1.0: Serialization framework
 
 ### Python Support
+
 - Python 3.8+
 - CPython implementation
 

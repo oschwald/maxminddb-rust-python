@@ -25,7 +25,9 @@ def main():
     print("\n1. Looking up IP address: 8.8.8.8")
     result = reader.get("8.8.8.8")
     if result:
-        print(f"   Country: {result.get('country', {}).get('names', {}).get('en', 'N/A')}")
+        print(
+            f"   Country: {result.get('country', {}).get('names', {}).get('en', 'N/A')}"
+        )
         print(f"   City: {result.get('city', {}).get('names', {}).get('en', 'N/A')}")
         print(f"   Latitude: {result.get('location', {}).get('latitude', 'N/A')}")
         print(f"   Longitude: {result.get('location', {}).get('longitude', 'N/A')}")
@@ -39,7 +41,9 @@ def main():
     ip = ipaddress.IPv4Address("1.1.1.1")
     result = reader.get(ip)
     if result:
-        print(f"   Country: {result.get('country', {}).get('names', {}).get('en', 'N/A')}")
+        print(
+            f"   Country: {result.get('country', {}).get('names', {}).get('en', 'N/A')}"
+        )
         print(f"   City: {result.get('city', {}).get('names', {}).get('en', 'N/A')}")
     else:
         print("   No data found for this IP")
@@ -48,7 +52,9 @@ def main():
     print("\n3. Looking up IP with prefix length: 208.67.222.222")
     result, prefix_len = reader.get_with_prefix_len("208.67.222.222")
     if result:
-        print(f"   Country: {result.get('country', {}).get('names', {}).get('en', 'N/A')}")
+        print(
+            f"   Country: {result.get('country', {}).get('names', {}).get('en', 'N/A')}"
+        )
         print(f"   Network prefix length: /{prefix_len}")
     else:
         print("   No data found for this IP")

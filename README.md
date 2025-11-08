@@ -6,11 +6,11 @@ A high-performance Rust-based Python module for MaxMind DB files. Provides 100% 
 
 Benchmark results (250,000 lookups with random IPs):
 
-| Database              | Size  | Lookups/sec |
-|-----------------------|-------|-------------|
-| GeoLite2-Country      | 9.4MB | 492,768     |
-| GeoLite2-City         | 61MB  | 318,882     |
-| GeoIP2-City           | 117MB | 308,254     |
+| Database         | Size  | Lookups/sec |
+| ---------------- | ----- | ----------- |
+| GeoLite2-Country | 9.4MB | 492,768     |
+| GeoLite2-City    | 61MB  | 318,882     |
+| GeoIP2-City      | 117MB | 308,254     |
 
 **Average: 373,301 lookups/second**
 
@@ -29,10 +29,11 @@ Benchmark results (250,000 lookups with random IPs):
 This package provides **100% API compatibility** with the official [`maxminddb`](https://github.com/maxmind/MaxMind-DB-Reader-python) Python module:
 
 **Supported:**
+
 - ✅ `Reader` class with `get()`, `get_with_prefix_len()`, `metadata()`, and `close()` methods
 - ✅ `open_database()` function
 - ✅ Context manager support (`with` statement)
-- ✅ MODE_* constants (MODE_AUTO, MODE_MMAP, etc.)
+- ✅ MODE\_\* constants (MODE_AUTO, MODE_MMAP, etc.)
 - ✅ `InvalidDatabaseError` exception
 - ✅ `Metadata` class with all attributes and computed properties
 - ✅ Support for string IP addresses and `ipaddress.IPv4Address`/`IPv6Address` objects
@@ -40,9 +41,11 @@ This package provides **100% API compatibility** with the official [`maxminddb`]
 - ✅ Iterator support (`__iter__`) for iterating over all database records
 
 **Extensions (not in original):**
+
 - ⭐ `get_many()` - Batch lookup method for processing multiple IPs efficiently
 
 **Not Yet Implemented:**
+
 - ⏸️ MODE_FILE mode (currently only MODE_AUTO, MODE_MMAP, and MODE_MEMORY supported)
 - ⏸️ File descriptor support in constructor
 
@@ -152,6 +155,7 @@ The `examples/` directory contains complete working examples demonstrating vario
 - **[batch_processing.py](examples/batch_processing.py)** - High-performance batch lookups with `get_many()`
 
 Run any example:
+
 ```bash
 .venv/bin/python examples/basic_usage.py
 .venv/bin/python examples/batch_processing.py

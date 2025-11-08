@@ -87,7 +87,7 @@ def performance_comparison():
         # Method 2: Batch get_many() call
         print(f"   Testing {len(ips)} lookups with get_many()...")
         start = time.time()
-        results_batch = reader.get_many(ips)
+        _ = reader.get_many(ips)
         time_batch = time.time() - start
 
         # Display results
@@ -149,7 +149,9 @@ def aggregate_statistics():
 
         for result in results:
             if result:
-                country = result.get("country", {}).get("names", {}).get("en", "Unknown")
+                country = (
+                    result.get("country", {}).get("names", {}).get("en", "Unknown")
+                )
                 city = result.get("city", {}).get("names", {}).get("en", "Unknown")
 
                 country_counts[country] = country_counts.get(country, 0) + 1

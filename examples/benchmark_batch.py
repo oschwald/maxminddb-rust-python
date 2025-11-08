@@ -19,7 +19,10 @@ random.seed(0)
 reader = maxminddb.open_database(args.file)
 
 # Pre-generate IPs
-ips = [socket.inet_ntoa(struct.pack("!L", random.getrandbits(32))) for _ in range(args.batch_size)]
+ips = [
+    socket.inet_ntoa(struct.pack("!L", random.getrandbits(32)))
+    for _ in range(args.batch_size)
+]
 
 
 def lookup_batch() -> None:

@@ -45,7 +45,9 @@ def context_manager_with_exception_handling():
                 try:
                     result = reader.get(ip)
                     if result:
-                        country = result.get("country", {}).get("names", {}).get("en", "N/A")
+                        country = (
+                            result.get("country", {}).get("names", {}).get("en", "N/A")
+                        )
                         print(f"   {ip:15s} -> {country}")
                     else:
                         print(f"   {ip:15s} -> No data found")
@@ -68,9 +70,9 @@ def multiple_databases():
     country_db = "/var/lib/GeoIP/GeoLite2-Country.mmdb"
 
     # Open multiple databases with nested context managers
-    with maxminddb_rust.open_database(city_db) as city_reader, \
-         maxminddb_rust.open_database(country_db) as country_reader:
-
+    with maxminddb_rust.open_database(
+        city_db
+    ) as city_reader, maxminddb_rust.open_database(country_db) as country_reader:
         ip = "8.8.8.8"
         print(f"   Looking up {ip} in both databases:")
 
@@ -83,7 +85,9 @@ def multiple_databases():
         # Query country database
         country_result = country_reader.get(ip)
         if country_result:
-            country = country_result.get("country", {}).get("names", {}).get("en", "N/A")
+            country = (
+                country_result.get("country", {}).get("names", {}).get("en", "N/A")
+            )
             print(f"   Country database: {country}")
 
     print(f"   Both databases closed: {city_reader.closed and country_reader.closed}")
@@ -96,7 +100,9 @@ def context_manager_with_different_modes():
 
     # MODE_MMAP (default, best performance)
     print("   Using MODE_MMAP (memory-mapped):")
-    with maxminddb_rust.open_database(DATABASE_PATH, mode=maxminddb_rust.MODE_MMAP) as reader:
+    with maxminddb_rust.open_database(
+        DATABASE_PATH, mode=maxminddb_rust.MODE_MMAP
+    ) as reader:
         result = reader.get("8.8.8.8")
         if result:
             country = result.get("country", {}).get("names", {}).get("en", "N/A")
@@ -104,7 +110,9 @@ def context_manager_with_different_modes():
 
     # MODE_MEMORY (loads entire database into memory)
     print("   Using MODE_MEMORY (in-memory):")
-    with maxminddb_rust.open_database(DATABASE_PATH, mode=maxminddb_rust.MODE_MEMORY) as reader:
+    with maxminddb_rust.open_database(
+        DATABASE_PATH, mode=maxminddb_rust.MODE_MEMORY
+    ) as reader:
         result = reader.get("1.1.1.1")
         if result:
             country = result.get("country", {}).get("names", {}).get("en", "N/A")
