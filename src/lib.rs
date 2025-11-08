@@ -4,8 +4,9 @@ use memmap2::Mmap;
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
     prelude::*,
-    types::PyModule,
+    types::{PyDict, PyModule},
 };
+use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::Read as IoRead;
@@ -16,6 +17,170 @@ use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex};
 
 // Define InvalidDatabaseError exception (subclass of RuntimeError)
 pyo3::create_exception!(maxminddb_pyo3_exceptions, InvalidDatabaseError, PyRuntimeError, "Invalid MaxMind DB");
+
+/// Custom value type that represents all possible MaxMind DB data types
+/// This allows us to properly handle byte arrays and uint128 which aren't supported by serde_json::Value
+#[derive(Debug, Clone)]
+enum MaxMindValue {
+    Array(Vec<MaxMindValue>),
+    Boolean(bool),
+    Bytes(Vec<u8>),
+    Double(f64),
+    Float(f32),
+    Int32(i32),
+    Map(BTreeMap<String, MaxMindValue>),
+    String(String),
+    Uint16(u16),
+    Uint32(u32),
+    Uint64(u64),
+    Uint128(u128),
+}
+
+impl MaxMindValue {
+    /// Convert MaxMindValue to Python object
+    fn to_python(&self, py: Python) -> PyResult<PyObject> {
+        match self {
+            MaxMindValue::Array(arr) => {
+                let list: Result<Vec<_>, _> = arr.iter()
+                    .map(|v| v.to_python(py))
+                    .collect();
+                Ok(list?.to_object(py))
+            }
+            MaxMindValue::Boolean(b) => Ok(b.to_object(py)),
+            MaxMindValue::Bytes(b) => {
+                // Create Python bytearray
+                let bytearray_class = py.import_bound("builtins")?.getattr("bytearray")?;
+                Ok(bytearray_class.call1((b.as_slice(),))?.unbind())
+            }
+            MaxMindValue::Double(d) => Ok(d.to_object(py)),
+            MaxMindValue::Float(f) => Ok(f.to_object(py)),
+            MaxMindValue::Int32(i) => Ok(i.to_object(py)),
+            MaxMindValue::Map(m) => {
+                let dict = PyDict::new_bound(py);
+                for (k, v) in m {
+                    dict.set_item(k, v.to_python(py)?)?;
+                }
+                Ok(dict.unbind().into())
+            }
+            MaxMindValue::String(s) => Ok(s.to_object(py)),
+            MaxMindValue::Uint16(u) => Ok(u.to_object(py)),
+            MaxMindValue::Uint32(u) => Ok(u.to_object(py)),
+            MaxMindValue::Uint64(u) => Ok(u.to_object(py)),
+            MaxMindValue::Uint128(u) => {
+                // Python int can handle arbitrary precision integers
+                Ok(u.to_object(py))
+            }
+        }
+    }
+}
+
+// Implement Deserialize for MaxMindValue to handle MaxMind DB data format
+impl<'de> Deserialize<'de> for MaxMindValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct MaxMindValueVisitor;
+
+        impl<'de> Visitor<'de> for MaxMindValueVisitor {
+            type Value = MaxMindValue;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("any valid MaxMind DB value")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+                Ok(MaxMindValue::Boolean(value))
+            }
+
+            fn visit_i32<E>(self, value: i32) -> Result<Self::Value, E> {
+                Ok(MaxMindValue::Int32(value))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                // MaxMind DB uses i32 for signed integers
+                if value >= i32::MIN as i64 && value <= i32::MAX as i64 {
+                    Ok(MaxMindValue::Int32(value as i32))
+                } else {
+                    Err(E::custom(format!("integer {} out of i32 range", value)))
+                }
+            }
+
+            fn visit_u16<E>(self, value: u16) -> Result<Self::Value, E> {
+                Ok(MaxMindValue::Uint16(value))
+            }
+
+            fn visit_u32<E>(self, value: u32) -> Result<Self::Value, E> {
+                Ok(MaxMindValue::Uint32(value))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+                Ok(MaxMindValue::Uint64(value))
+            }
+
+            fn visit_u128<E>(self, value: u128) -> Result<Self::Value, E> {
+                Ok(MaxMindValue::Uint128(value))
+            }
+
+            fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E> {
+                Ok(MaxMindValue::Float(value))
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E> {
+                Ok(MaxMindValue::Double(value))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(MaxMindValue::String(value.to_owned()))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E> {
+                Ok(MaxMindValue::String(value))
+            }
+
+            fn visit_bytes<E>(self, value: &[u8]) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(MaxMindValue::Bytes(value.to_owned()))
+            }
+
+            fn visit_byte_buf<E>(self, value: Vec<u8>) -> Result<Self::Value, E> {
+                Ok(MaxMindValue::Bytes(value))
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut vec = Vec::new();
+                while let Some(elem) = seq.next_element()? {
+                    vec.push(elem);
+                }
+                Ok(MaxMindValue::Array(vec))
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut result = BTreeMap::new();
+                while let Some((key, value)) = map.next_entry()? {
+                    result.insert(key, value);
+                }
+                Ok(MaxMindValue::Map(result))
+            }
+        }
+
+        deserializer.deserialize_any(MaxMindValueVisitor)
+    }
+}
 
 // Mode constants matching original maxminddb module
 const MODE_AUTO: i32 = 0;
@@ -32,14 +197,14 @@ enum ReaderSource {
 }
 
 impl ReaderSource {
-    fn lookup(&self, ip: IpAddr) -> Result<Option<serde_json::Value>, maxminddb_crate::MaxMindDbError> {
+    fn lookup(&self, ip: IpAddr) -> Result<Option<MaxMindValue>, maxminddb_crate::MaxMindDbError> {
         match self {
             ReaderSource::Mmap(reader) => reader.lookup(ip),
             ReaderSource::Memory(reader) => reader.lookup(ip),
         }
     }
 
-    fn lookup_prefix(&self, ip: IpAddr) -> Result<(Option<serde_json::Value>, usize), maxminddb_crate::MaxMindDbError> {
+    fn lookup_prefix(&self, ip: IpAddr) -> Result<(Option<MaxMindValue>, usize), maxminddb_crate::MaxMindDbError> {
         match self {
             ReaderSource::Mmap(reader) => reader.lookup_prefix(ip),
             ReaderSource::Memory(reader) => reader.lookup_prefix(ip),
@@ -54,7 +219,7 @@ impl ReaderSource {
     }
 
     /// Collect all items within a network range
-    fn collect_within(&self, network: ipnetwork::IpNetwork) -> Result<Vec<(ipnetwork::IpNetwork, serde_json::Value)>, maxminddb_crate::MaxMindDbError> {
+    fn collect_within(&self, network: ipnetwork::IpNetwork) -> Result<Vec<(ipnetwork::IpNetwork, MaxMindValue)>, maxminddb_crate::MaxMindDbError> {
         let mut items = Vec::new();
         match self {
             ReaderSource::Mmap(reader) => {
@@ -99,16 +264,18 @@ struct Metadata {
 impl Metadata {
     #[getter]
     fn description(&self, py: Python) -> PyResult<PyObject> {
-        pythonize::pythonize(py, &self.description_dict)
-            .map(|obj| obj.unbind())
-            .map_err(|e| InvalidDatabaseError::new_err(format!("Metadata conversion error: {e}")))
+        // Convert BTreeMap<String, String> to Python dict
+        let dict = PyDict::new_bound(py);
+        for (k, v) in &self.description_dict {
+            dict.set_item(k, v)?;
+        }
+        Ok(dict.unbind().into())
     }
 
     #[getter]
     fn languages(&self, py: Python) -> PyResult<PyObject> {
-        pythonize::pythonize(py, &self.languages_list)
-            .map(|obj| obj.unbind())
-            .map_err(|e| InvalidDatabaseError::new_err(format!("Metadata conversion error: {e}")))
+        // Convert Vec<String> to Python list
+        Ok(self.languages_list.to_object(py))
     }
 
     #[getter]
@@ -162,13 +329,13 @@ impl Reader {
             MODE_MMAP | MODE_MMAP_EXT => open_database_mmap(&path),
             MODE_MEMORY => open_database_memory(&path),
             MODE_FILE => Err(PyValueError::new_err(
-                "MODE_FILE not yet supported, use MODE_MMAP or MODE_MEMORY"
+                "MODE_FILE not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY"
             )),
             MODE_FD => Err(PyValueError::new_err(
-                "MODE_FD not yet supported, use MODE_MMAP or MODE_MEMORY"
+                "MODE_FD not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY"
             )),
             _ => Err(PyValueError::new_err(format!(
-                "Unknown mode {actual_mode}, use MODE_MMAP or MODE_MEMORY"
+                "Unknown mode {actual_mode}, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY"
             ))),
         }
     }
@@ -193,7 +360,7 @@ impl Reader {
         let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Database is closed"))?;
 
         // Release GIL during both parsing and lookup for better concurrency
-        let result: Option<serde_json::Value> = py.allow_threads(|| {
+        let result: Option<MaxMindValue> = py.allow_threads(|| {
             // Parse IP address
             let ip_addr: IpAddr = ip_str.parse().ok()?;
 
@@ -203,12 +370,7 @@ impl Reader {
 
         // Convert result to Python object
         match result {
-            Some(data) => {
-                // Use pythonize for direct serde to Python conversion
-                pythonize::pythonize(py, &data)
-                    .map(|obj| obj.unbind())
-                    .map_err(|e| InvalidDatabaseError::new_err(format!("Conversion error: {e}")))
-            }
+            Some(data) => data.to_python(py),
             None => Ok(py.None()),
         }
     }
@@ -231,7 +393,7 @@ impl Reader {
         let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Database is closed"))?;
 
         // Release GIL during lookup
-        let (result, prefix_len): (Option<serde_json::Value>, usize) = py.allow_threads(|| {
+        let (result, prefix_len): (Option<MaxMindValue>, usize) = py.allow_threads(|| {
             // Parse IP address
             let ip_addr: IpAddr = match ip_str.parse() {
                 Ok(addr) => addr,
@@ -248,9 +410,7 @@ impl Reader {
 
         // Convert result to Python object
         let py_obj = match result {
-            Some(data) => pythonize::pythonize(py, &data)
-                .map(|obj| obj.unbind())
-                .map_err(|e| InvalidDatabaseError::new_err(format!("Conversion error: {e}")))?,
+            Some(data) => data.to_python(py)?,
             None => py.None(),
         };
 
@@ -270,7 +430,7 @@ impl Reader {
         let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Database is closed"))?;
 
         // Release GIL during all lookups
-        let results: Vec<PyResult<Option<serde_json::Value>>> = py.allow_threads(|| {
+        let results: Vec<PyResult<Option<MaxMindValue>>> = py.allow_threads(|| {
             ips.iter()
                 .map(|ip| {
                     let ip_addr: IpAddr = ip.parse().map_err(|_| {
@@ -289,9 +449,7 @@ impl Reader {
         results
             .into_iter()
             .map(|result| match result? {
-                Some(data) => pythonize::pythonize(py, &data)
-                    .map(|obj| obj.unbind())
-                    .map_err(|e| InvalidDatabaseError::new_err(format!("Conversion error: {e}"))),
+                Some(data) => data.to_python(py),
                 None => Ok(py.None()),
             })
             .collect()
@@ -363,7 +521,7 @@ impl Reader {
 /// Iterator for Reader that yields (network, record) tuples
 #[pyclass]
 struct ReaderIterator {
-    items: Vec<(ipnetwork::IpNetwork, serde_json::Value)>,
+    items: Vec<(ipnetwork::IpNetwork, MaxMindValue)>,
     current_index: usize,
 }
 
@@ -412,19 +570,17 @@ impl ReaderIterator {
         // Convert IpNetwork to Python ipaddress.IPv4Network or IPv6Network
         let network_obj = match network {
             ipnetwork::IpNetwork::V4(v4) => {
-                let ipaddress = py.import("ipaddress")?;
+                let ipaddress = py.import_bound("ipaddress")?;
                 ipaddress.call_method1("IPv4Network", (v4.to_string(),))?
             }
             ipnetwork::IpNetwork::V6(v6) => {
-                let ipaddress = py.import("ipaddress")?;
+                let ipaddress = py.import_bound("ipaddress")?;
                 ipaddress.call_method1("IPv6Network", (v6.to_string(),))?
             }
         };
 
         // Convert data to Python object
-        let data_obj = pythonize::pythonize(py, data)
-            .map(|obj| obj.unbind())
-            .map_err(|e| InvalidDatabaseError::new_err(format!("Conversion error: {e}")))?;
+        let data_obj = data.to_python(py)?;
 
         Ok(Some((network_obj.unbind(), data_obj)))
     }
