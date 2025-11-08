@@ -50,12 +50,12 @@ jobs:
 
       - name: Set up QEMU
         if: runner.os == 'Linux' && matrix.target == 'aarch64'
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
         with:
           platforms: arm64
 
       - name: Build wheels
-        uses: PyO3/maturin-action@3b5f400f9576c9934eaeed862ce6281fef121b67 # v1
+        uses: PyO3/maturin-action@86b9d133d34bc1b40018696f782949dac11bd380 # v1.49.4
         with:
           target: ${{ matrix.target }}
           args: --release --out dist --interpreter 3.9 3.10 3.11 3.12 3.13 3.14
@@ -63,7 +63,7 @@ jobs:
           manylinux: auto
 
       - name: Upload wheels
-        uses: actions/upload-artifact@ea054f79f8bb44bf3221c1d8093e6ced4e2bae6e # v4.5.0
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: maxminddb-rust-whl-${{ matrix.os }}-${{ matrix.target }}
           path: dist
@@ -77,13 +77,13 @@ jobs:
           persist-credentials: false
 
       - name: Build sdist
-        uses: PyO3/maturin-action@3b5f400f9576c9934eaeed862ce6281fef121b67 # v1
+        uses: PyO3/maturin-action@86b9d133d34bc1b40018696f782949dac11bd380 # v1.49.4
         with:
           command: sdist
           args: --out dist
 
       - name: Upload sdist
-        uses: actions/upload-artifact@ea054f79f8bb44bf3221c1d8093e6ced4e2bae6e # v4.5.0
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: maxminddb-rust-sdist
           path: dist
@@ -98,11 +98,11 @@ jobs:
       id-token: write
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc0ff # v4.2.0
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           pattern: maxminddb-rust-*
           path: dist
           merge-multiple: true
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@67339c736fd9354cd4f8cb0b744f2b82a74b5c70 # v1.12.2
+        uses: pypa/gh-action-pypi-publish@c03e7fc4fb68e760409a4eb05a41050da01d8412 # v1.13.0
