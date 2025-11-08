@@ -16,7 +16,7 @@ use std::{
     net::IpAddr,
     path::Path,
     str::FromStr,
-    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex},
+    sync::{atomic::{AtomicBool, Ordering}, Arc, RwLock},
 };
 
 // Define InvalidDatabaseError exception (subclass of RuntimeError)
@@ -281,7 +281,7 @@ impl Metadata {
 /// Supports both memory-mapped files (MODE_MMAP) and in-memory (MODE_MEMORY) modes.
 #[pyclass(module = "maxminddb.extension")]
 struct Reader {
-    reader: Arc<Mutex<Option<Arc<ReaderSource>>>>,
+    reader: Arc<RwLock<Option<Arc<ReaderSource>>>>,
     closed: Arc<AtomicBool>,
 }
 
@@ -520,7 +520,9 @@ impl Reader {
     fn close(&self) {
         // Set closed flag and clear the reader
         self.closed.store(true, Ordering::Release);
-        *self.reader.lock().unwrap() = None;
+        if let Ok(mut guard) = self.reader.write() {
+            *guard = None;
+        }
     }
 
     /// Context manager entry
@@ -560,8 +562,8 @@ impl Reader {
     /// Get the reader from the internal mutex, returning an error if closed
     fn get_reader(&self) -> PyResult<Arc<ReaderSource>> {
         self.reader
-            .lock()
-            .unwrap()
+            .read()
+            .map_err(|_| PyValueError::new_err(ERR_CLOSED_DB))?
             .clone()
             .ok_or_else(|| PyValueError::new_err(ERR_CLOSED_DB))
     }
@@ -706,7 +708,7 @@ fn open_file(path: &str) -> PyResult<File> {
 /// Helper function to create a Reader from a ReaderSource
 fn create_reader(source: ReaderSource) -> Reader {
     Reader {
-        reader: Arc::new(Mutex::new(Some(Arc::new(source)))),
+        reader: Arc::new(RwLock::new(Some(Arc::new(source)))),
         closed: Arc::new(AtomicBool::new(false)),
     }
 }
