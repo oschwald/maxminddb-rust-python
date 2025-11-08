@@ -1,5 +1,5 @@
 use ::maxminddb as maxminddb_crate;
-use maxminddb_crate::Reader as MaxMindReader;
+use maxminddb_crate::{Reader as MaxMindReader, Within, WithinItem};
 use memmap2::Mmap;
 use pyo3::{
     exceptions::{PyFileNotFoundError, PyIOError, PyOSError, PyRuntimeError, PyValueError},
@@ -7,13 +7,16 @@ use pyo3::{
     types::{PyDict, PyModule},
 };
 use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
-use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::Read as IoRead;
-use std::net::IpAddr;
-use std::path::Path;
-use std::str::FromStr;
-use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex};
+use std::{
+    collections::BTreeMap,
+    fs::File,
+    io::Read as IoRead,
+    mem::transmute,
+    net::IpAddr,
+    path::Path,
+    str::FromStr,
+    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex},
+};
 
 // Define InvalidDatabaseError exception (subclass of RuntimeError)
 pyo3::create_exception!(maxminddb_pyo3_exceptions, InvalidDatabaseError, PyRuntimeError, "Invalid MaxMind DB");
@@ -222,25 +225,6 @@ impl ReaderSource {
         }
     }
 
-    /// Collect all items within a network range
-    fn collect_within(&self, network: ipnetwork::IpNetwork) -> Result<Vec<(ipnetwork::IpNetwork, MaxMindValue)>, maxminddb_crate::MaxMindDbError> {
-        let mut items = Vec::new();
-        match self {
-            ReaderSource::Mmap(reader) => {
-                for result in reader.within(network)? {
-                    let item = result?;
-                    items.push((item.ip_net, item.info));
-                }
-            }
-            ReaderSource::Memory(reader) => {
-                for result in reader.within(network)? {
-                    let item = result?;
-                    items.push((item.ip_net, item.info));
-                }
-            }
-        }
-        Ok(items)
-    }
 }
 
 /// Metadata about the MaxMind DB database
@@ -567,7 +551,7 @@ impl Reader {
         }
 
         let reader = slf.get_reader()?;
-        ReaderIterator::new(reader)
+        ReaderIterator::new(slf.py(), reader)
     }
 }
 
@@ -586,12 +570,14 @@ impl Reader {
 /// Iterator for Reader that yields (network, record) tuples
 #[pyclass(module = "maxminddb.extension")]
 struct ReaderIterator {
-    items: Vec<(ipnetwork::IpNetwork, MaxMindValue)>,
-    current_index: usize,
+    _reader_guard: Arc<ReaderSource>,
+    iter: ReaderWithin,
+    ipv4_network_cls: Py<PyAny>,
+    ipv6_network_cls: Py<PyAny>,
 }
 
 impl ReaderIterator {
-    fn new(reader: Arc<ReaderSource>) -> PyResult<Self> {
+    fn new(py: Python, reader: Arc<ReaderSource>) -> PyResult<Self> {
         let ip_version = reader.metadata().ip_version;
 
         // For IPv4 databases, iterate over IPv4 range only
@@ -607,14 +593,20 @@ impl ReaderIterator {
                 format!("Failed to create {} network: {}", network_type, e)
             ))?;
 
-        let items = reader.collect_within(network)
+        let iter = ReaderWithin::new(&reader, network)
             .map_err(|e| InvalidDatabaseError::new_err(
                 format!("Failed to iterate {}: {}", network_type, e)
             ))?;
 
+        let ipaddress = py.import_bound("ipaddress")?;
+        let ipv4_network_cls = ipaddress.getattr("IPv4Network")?.unbind();
+        let ipv6_network_cls = ipaddress.getattr("IPv6Network")?.unbind();
+
         Ok(Self {
-            items,
-            current_index: 0,
+            _reader_guard: reader,
+            iter,
+            ipv4_network_cls,
+            ipv6_network_cls,
         })
     }
 }
@@ -626,25 +618,52 @@ impl ReaderIterator {
     }
 
     fn __next__(&mut self, py: Python) -> PyResult<Option<(PyObject, PyObject)>> {
-        if self.current_index >= self.items.len() {
-            return Ok(None);
-        }
-
-        let (network, data) = &self.items[self.current_index];
-        self.current_index += 1;
+        let next_item = match self.iter.next() {
+            Some(result) => result.map_err(|e| InvalidDatabaseError::new_err(format!("Iteration error: {}", e)))?,
+            None => return Ok(None),
+        };
 
         // Convert IpNetwork to Python ipaddress.IPv4Network or IPv6Network
-        let ipaddress = py.import_bound("ipaddress")?;
-        let (class_name, network_str) = match network {
-            ipnetwork::IpNetwork::V4(v4) => ("IPv4Network", v4.to_string()),
-            ipnetwork::IpNetwork::V6(v6) => ("IPv6Network", v6.to_string()),
+        let (class, network_str) = match next_item.ip_net {
+            ipnetwork::IpNetwork::V4(v4) => (self.ipv4_network_cls.bind(py), v4.to_string()),
+            ipnetwork::IpNetwork::V6(v6) => (self.ipv6_network_cls.bind(py), v6.to_string()),
         };
-        let network_obj = ipaddress.call_method1(class_name, (network_str,))?;
+        let network_obj = class.call1((network_str,))?;
 
         // Convert data to Python object
-        let data_obj = data.to_python(py)?;
+        let data_obj = next_item.info.to_python(py)?;
 
         Ok(Some((network_obj.unbind(), data_obj)))
+    }
+}
+
+enum ReaderWithin {
+    Mmap(Within<'static, MaxMindValue, Mmap>),
+    Memory(Within<'static, MaxMindValue, Vec<u8>>),
+}
+
+impl ReaderWithin {
+    fn new(reader: &Arc<ReaderSource>, network: ipnetwork::IpNetwork) -> Result<Self, maxminddb_crate::MaxMindDbError> {
+        match reader.as_ref() {
+            ReaderSource::Mmap(inner) => {
+                let iter = inner.within::<MaxMindValue>(network)?;
+                // SAFETY: the iterator holds a reference into `inner`. We store an Arc guard
+                // alongside it so the reader outlives the transmuted iterator.
+                Ok(Self::Mmap(unsafe { transmute(iter) }))
+            }
+            ReaderSource::Memory(inner) => {
+                let iter = inner.within::<MaxMindValue>(network)?;
+                // SAFETY: same as above, the Arc guard in `ReaderIterator` keeps the reader alive.
+                Ok(Self::Memory(unsafe { transmute(iter) }))
+            }
+        }
+    }
+
+    fn next(&mut self) -> Option<Result<WithinItem<MaxMindValue>, maxminddb_crate::MaxMindDbError>> {
+        match self {
+            ReaderWithin::Mmap(iter) => iter.next(),
+            ReaderWithin::Memory(iter) => iter.next(),
+        }
     }
 }
 
