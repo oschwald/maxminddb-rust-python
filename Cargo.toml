@@ -3,12 +3,12 @@ name = "maxminddb-rust"
 version = "0.1.0"
 edition = "2021"
 authors = ["Gregory Oschwald <oschwald@gmail.com>"]
-description = "Rust-based Python binding for MaxMind DB - drop-in replacement for maxminddb"
+description = "Rust-based Python binding for MaxMind DB - high-performance alternative to maxminddb"
 license = "ISC"
 repository = "https://github.com/oschwald/maxminddb-pyo3"
 
 [lib]
-name = "maxminddb"
+name = "maxminddb_rust"
 crate-type = ["cdylib"]
 
 [dependencies]

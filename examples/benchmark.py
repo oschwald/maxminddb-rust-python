@@ -6,7 +6,7 @@ import socket
 import struct
 import timeit
 
-import maxminddb
+import maxminddb_rust
 
 parser = argparse.ArgumentParser(description="Benchmark maxminddb.")
 parser.add_argument("--count", default=250000, type=int, help="number of lookups")
@@ -16,7 +16,7 @@ parser.add_argument("--file", default="GeoIP2-City.mmdb", help="path to mmdb fil
 args = parser.parse_args()
 
 random.seed(0)
-reader = maxminddb.open_database(args.file)
+reader = maxminddb_rust.open_database(args.file)
 
 
 def lookup_ip_address() -> None:

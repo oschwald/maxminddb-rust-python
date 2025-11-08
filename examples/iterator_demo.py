@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Iterator usage example for maxminddb module.
+Iterator usage example for maxminddb_rust module.
 
 Demonstrates how to iterate over all networks in a MaxMind DB database.
 This is useful for exporting data, analyzing database contents, or
 performing bulk operations.
 """
 
-import maxminddb
+import maxminddb_rust
 from collections import Counter
 
 # Path to your MaxMind database file
@@ -20,7 +20,7 @@ def basic_iteration():
     print("\n1. Basic iteration - first 10 networks")
     print("-" * 60)
 
-    with maxminddb.open_database(DATABASE_PATH) as reader:
+    with maxminddb_rust.open_database(DATABASE_PATH) as reader:
         count = 0
         for network, data in reader:
             country_code = data.get("country", {}).get("iso_code", "N/A")
@@ -37,7 +37,7 @@ def count_networks_by_country():
     print("\n2. Count networks by country (top 10)")
     print("-" * 60)
 
-    with maxminddb.open_database(DATABASE_PATH) as reader:
+    with maxminddb_rust.open_database(DATABASE_PATH) as reader:
         country_counter = Counter()
 
         for network, data in reader:
@@ -54,7 +54,7 @@ def filter_networks():
     print("\n3. Filter networks - US networks only (first 10)")
     print("-" * 60)
 
-    with maxminddb.open_database(DATABASE_PATH) as reader:
+    with maxminddb_rust.open_database(DATABASE_PATH) as reader:
         count = 0
 
         for network, data in reader:
@@ -73,7 +73,7 @@ def get_network_statistics():
     print("\n4. Network statistics")
     print("-" * 60)
 
-    with maxminddb.open_database(DATABASE_PATH) as reader:
+    with maxminddb_rust.open_database(DATABASE_PATH) as reader:
         total_networks = 0
         ipv4_networks = 0
         ipv6_networks = 0
@@ -115,7 +115,7 @@ def export_to_csv():
     import csv
     import sys
 
-    with maxminddb.open_database(DATABASE_PATH) as reader:
+    with maxminddb_rust.open_database(DATABASE_PATH) as reader:
         # Create CSV writer
         writer = csv.writer(sys.stdout)
         writer.writerow(["Network", "Country Code", "Country Name", "Continent Code"])
@@ -142,7 +142,7 @@ def search_for_network():
 
     target_ip = ipaddress.IPv4Address("8.8.8.8")
 
-    with maxminddb.open_database(DATABASE_PATH) as reader:
+    with maxminddb_rust.open_database(DATABASE_PATH) as reader:
         for network, data in reader:
             # Check if target IP is in this network
             if target_ip in network:

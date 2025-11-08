@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-Batch processing example for maxminddb module.
+Batch processing example for maxminddb_rust module.
 
 Demonstrates the use of the get_many() extension method for efficient
 batch IP lookups. This method is significantly faster than calling get()
 repeatedly, as it reduces Python call overhead and releases the GIL
 during the entire batch operation.
 
-Note: get_many() is an extension method not available in the original
-maxminddb module.
+Note: get_many() is an extension method not available in the official
+maxminddb package.
 """
 
 import time
-import maxminddb
+import maxminddb_rust
 from typing import List
 
 # Path to your MaxMind database file
@@ -55,7 +55,7 @@ def basic_batch_lookup():
         "149.112.112.112",
     ]
 
-    with maxminddb.open_database(DATABASE_PATH) as reader:
+    with maxminddb_rust.open_database(DATABASE_PATH) as reader:
         print(f"   Looking up {len(ips)} IP addresses...")
         results = reader.get_many(ips)
 
@@ -73,9 +73,9 @@ def performance_comparison():
     print("\n2. Performance comparison: get() vs get_many()")
     print("-" * 60)
 
-    ips = generate_sample_ips(1000)
+    ips = generate_sample_ips(1000000)
 
-    with maxminddb.open_database(DATABASE_PATH) as reader:
+    with maxminddb_rust.open_database(DATABASE_PATH) as reader:
         # Method 1: Individual get() calls
         print(f"   Testing {len(ips)} lookups with individual get() calls...")
         start = time.time()
@@ -116,7 +116,7 @@ def process_log_file_simulation():
 
     print(f"   Processing {len(log_entries)} log entries...")
 
-    with maxminddb.open_database(DATABASE_PATH) as reader:
+    with maxminddb_rust.open_database(DATABASE_PATH) as reader:
         # Perform batch lookup
         results = reader.get_many(ips)
 
@@ -139,7 +139,7 @@ def aggregate_statistics():
 
     ips = generate_sample_ips(500)
 
-    with maxminddb.open_database(DATABASE_PATH) as reader:
+    with maxminddb_rust.open_database(DATABASE_PATH) as reader:
         print(f"   Looking up {len(ips)} IP addresses...")
         results = reader.get_many(ips)
 
@@ -183,7 +183,7 @@ def batch_with_error_handling():
         "208.67.222.222",
     ]
 
-    with maxminddb.open_database(DATABASE_PATH) as reader:
+    with maxminddb_rust.open_database(DATABASE_PATH) as reader:
         try:
             results = reader.get_many(ips)
             print(f"   Successfully looked up {len(results)} IPs")
@@ -203,7 +203,7 @@ def chunked_batch_processing():
 
     print(f"   Processing {len(all_ips)} IPs in chunks of {chunk_size}...")
 
-    with maxminddb.open_database(DATABASE_PATH) as reader:
+    with maxminddb_rust.open_database(DATABASE_PATH) as reader:
         total_processed = 0
         start = time.time()
 

@@ -279,7 +279,7 @@ impl ReaderSource {
 }
 
 /// Metadata about the MaxMind DB database
-#[pyclass(module = "maxminddb.extension")]
+#[pyclass(module = "maxminddb_rust.extension")]
 struct Metadata {
     /// The major version number of the binary format used when creating the database.
     #[pyo3(get)]
@@ -342,7 +342,7 @@ impl Metadata {
 
 /// A Python wrapper around the MaxMind DB reader.
 /// Supports both memory-mapped files (MODE_MMAP) and in-memory (MODE_MEMORY) modes.
-#[pyclass(module = "maxminddb.extension")]
+#[pyclass(module = "maxminddb_rust.extension")]
 struct Reader {
     reader: Arc<RwLock<Option<Arc<ReaderSource>>>>,
     closed: Arc<AtomicBool>,
@@ -398,7 +398,7 @@ impl Reader {
     ///     True if the database has been closed, False otherwise.
     ///
     /// Example:
-    ///     >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb')
+    ///     >>> reader = maxminddb_rust.open_database('/path/to/GeoIP2-City.mmdb')
     ///     >>> reader.closed
     ///     False
     ///     >>> reader.close()
@@ -424,7 +424,7 @@ impl Reader {
     ///     InvalidDatabaseError: If the database data is corrupt or invalid.
     ///
     /// Example:
-    ///     >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb')
+    ///     >>> reader = maxminddb_rust.open_database('/path/to/GeoIP2-City.mmdb')
     ///     >>> reader.get('8.8.8.8')
     ///     {'city': {'names': {'en': 'Mountain View'}}, ...}
     #[inline]
@@ -472,7 +472,7 @@ impl Reader {
     ///     InvalidDatabaseError: If the database data is corrupt or invalid.
     ///
     /// Example:
-    ///     >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb')
+    ///     >>> reader = maxminddb_rust.open_database('/path/to/GeoIP2-City.mmdb')
     ///     >>> record, prefix_len = reader.get_with_prefix_len('8.8.8.8')
     ///     >>> prefix_len
     ///     24
@@ -530,7 +530,7 @@ impl Reader {
     ///     InvalidDatabaseError: If the database data is corrupt or invalid.
     ///
     /// Example:
-    ///     >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb')
+    ///     >>> reader = maxminddb_rust.open_database('/path/to/GeoIP2-City.mmdb')
     ///     >>> ips = ['8.8.8.8', '1.1.1.1', '208.67.222.222']
     ///     >>> results = reader.get_many(ips)
     ///     >>> len(results)
@@ -595,7 +595,7 @@ impl Reader {
     ///     OSError: If the database has been closed.
     ///
     /// Example:
-    ///     >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb')
+    ///     >>> reader = maxminddb_rust.open_database('/path/to/GeoIP2-City.mmdb')
     ///     >>> metadata = reader.metadata()
     ///     >>> metadata.database_type
     ///     'GeoIP2-City'
@@ -633,7 +633,7 @@ impl Reader {
     /// methods will raise a ValueError.
     ///
     /// Example:
-    ///     >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb')
+    ///     >>> reader = maxminddb_rust.open_database('/path/to/GeoIP2-City.mmdb')
     ///     >>> reader.close()
     ///     >>> reader.get('8.8.8.8')  # Raises ValueError
     fn close(&self) {
@@ -653,7 +653,7 @@ impl Reader {
     ///     ValueError: If attempting to reopen a closed database.
     ///
     /// Example:
-    ///     >>> with maxminddb.open_database('/path/to/GeoIP2-City.mmdb') as reader:
+    ///     >>> with maxminddb_rust.open_database('/path/to/GeoIP2-City.mmdb') as reader:
     ///     ...     result = reader.get('8.8.8.8')
     fn __enter__(slf: Py<Self>, py: Python) -> PyResult<Py<Self>> {
         // Check if database is closed
@@ -691,7 +691,7 @@ impl Reader {
     ///     ValueError: If the database has been closed.
     ///
     /// Example:
-    ///     >>> reader = maxminddb.open_database('/path/to/GeoLite2-Country.mmdb')
+    ///     >>> reader = maxminddb_rust.open_database('/path/to/GeoLite2-Country.mmdb')
     ///     >>> for network, data in reader:
     ///     ...     print(f"{network}: {data['country']['iso_code']}")
     ///     ...     break
@@ -721,7 +721,7 @@ impl Reader {
 }
 
 /// Iterator for Reader that yields (network, record) tuples
-#[pyclass(module = "maxminddb.extension")]
+#[pyclass(module = "maxminddb_rust.extension")]
 struct ReaderIterator {
     _reader_guard: Arc<ReaderSource>,
     iter: ReaderWithin,
@@ -957,19 +957,19 @@ fn open_database_memory(path: &str) -> PyResult<Reader> {
 ///     ValueError: If an unsupported mode is specified.
 ///
 /// Example:
-///     >>> import maxminddb
-///     >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb')
+///     >>> import maxminddb_rust
+///     >>> reader = maxminddb_rust.open_database('/path/to/GeoIP2-City.mmdb')
 ///     >>> reader.get('8.8.8.8')
 ///     {'city': {'names': {'en': 'Mountain View'}}, ...}
 ///     >>> reader.close()
 ///
 ///     >>> # Using context manager
-///     >>> with maxminddb.open_database('/path/to/GeoIP2-City.mmdb') as reader:
+///     >>> with maxminddb_rust.open_database('/path/to/GeoIP2-City.mmdb') as reader:
 ///     ...     result = reader.get('8.8.8.8')
 ///
 ///     >>> # Specify mode explicitly
-///     >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb',
-///     ...                                   mode=maxminddb.MODE_MEMORY)
+///     >>> reader = maxminddb_rust.open_database('/path/to/GeoIP2-City.mmdb',
+///     ...                                   mode=maxminddb_rust.MODE_MEMORY)
 #[pyfunction]
 #[pyo3(signature = (database, mode=MODE_AUTO))]
 fn open_database(database: &Bound<'_, PyAny>, mode: i32) -> PyResult<Reader> {
@@ -978,7 +978,7 @@ fn open_database(database: &Bound<'_, PyAny>, mode: i32) -> PyResult<Reader> {
 
 /// Python module definition
 #[pymodule]
-fn maxminddb(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn maxminddb_rust(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Add classes
     m.add_class::<Reader>()?;
     m.add_class::<Metadata>()?;

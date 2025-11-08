@@ -7,31 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- Comprehensive Python API docstrings for all public methods and classes
-- Type stub file (`maxminddb.pyi`) for IDE autocomplete and type checking support
-- `py.typed` marker file to indicate type hint support
-- Example scripts demonstrating common usage patterns
-- This CHANGELOG file to track project history
-
-### Changed
-- Performance improvements: 45% average speedup across all database types
-  - GeoLite2-Country: 347K → 493K lookups/sec (+42%)
-  - GeoLite2-City: 215K → 319K lookups/sec (+49%)
-  - GeoIP2-City: 211K → 308K lookups/sec (+46%)
-
-### Performance Optimizations
-- Avoided cloning map keys during deserialization
-- Optimized Python object deserialization with reduced allocations
-- Optimized lookup performance with caching
-- Reduced parsing overhead in get() lookups
-- Reduced reader lock contention with RwLock
-
 ## [0.1.0] - Initial Release
 
 ### Added
-- Drop-in replacement for the `maxminddb` Python module
-- Full API compatibility with original maxminddb package
+- High-performance Rust-based Python module for MaxMind DB files
+- 100% API compatibility with the official `maxminddb` Python package
   - `Reader` class with `get()`, `get_with_prefix_len()`, `metadata()`, and `close()` methods
   - `open_database()` function
   - Context manager support (`with` statement)
@@ -41,14 +21,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Support for string IP addresses and `ipaddress.IPv4Address`/`IPv6Address` objects
   - `closed` attribute
   - Iterator support for iterating over all database records
-- Extension method `get_many()` for efficient batch IP lookups
+- Extension method `get_many()` for efficient batch IP lookups (not in official package)
+- Comprehensive Python API docstrings for all public methods and classes
+- Type stub file (`maxminddb_rust.pyi`) for IDE autocomplete and type checking support
+- `py.typed` marker file for PEP 561 compliance
+- Example scripts demonstrating common usage patterns:
+  - basic_usage.py: Simple lookups and database lifecycle
+  - context_manager.py: Using 'with' statement patterns
+  - iterator_demo.py: Iterating over all database networks
+  - batch_processing.py: High-performance batch lookups with get_many()
+- Migration guide (MIGRATION.md) for users switching from the official maxminddb package
+- Comprehensive test suite with upstream compatibility tests from MaxMind
+- This CHANGELOG file
+
+### Performance
+- 45% faster average performance: 373K lookups/second vs official package
+  - GeoLite2-Country: 493K lookups/sec
+  - GeoLite2-City: 319K lookups/sec
+  - GeoIP2-City: 308K lookups/sec
 - Memory-mapped file I/O for optimal performance
 - GIL release during lookups for better concurrency
 - Thin LTO and aggressive compiler optimizations
-- Support for Python 3.8+
-- Comprehensive test suite with upstream compatibility tests
+- Zero-copy operations where possible
+- Optimized Python object deserialization with reduced allocations
+- Reduced reader lock contention with RwLock
+- Batch processing support with `get_many()`
 
-### Supported
+### Supported Modes
 - MODE_AUTO: Automatically choose the best mode (uses MODE_MMAP)
 - MODE_MMAP: Memory-mapped file I/O (default, best performance)
 - MODE_MMAP_EXT: Same as MODE_MMAP
@@ -65,11 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ipnetwork 0.21: IP network types
 - serde 1.0: Serialization framework
 
-### Performance
-- Average: 257K lookups/second (initial release, before optimizations)
-- Memory-efficient with memory-mapped files
-- Zero-copy operations where possible
-- Batch processing support with `get_many()`
+### Python Support
+- Python 3.8+
+- CPython implementation
 
 [Unreleased]: https://github.com/oschwald/maxminddb-pyo3/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/oschwald/maxminddb-pyo3/releases/tag/v0.1.0

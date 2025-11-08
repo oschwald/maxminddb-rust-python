@@ -1,6 +1,6 @@
 # maxminddb-rust
 
-A Rust-based Python binding for MaxMind DB files, providing a drop-in replacement for the [`maxminddb`](https://github.com/maxmind/MaxMind-DB-Reader-python) module with API compatibility.
+A high-performance Rust-based Python module for MaxMind DB files. Provides 100% API compatibility with the official [`maxminddb`](https://github.com/maxmind/MaxMind-DB-Reader-python) module with significantly better performance.
 
 ## Performance
 
@@ -26,7 +26,7 @@ Benchmark results (250,000 lookups with random IPs):
 
 ### API Compatibility
 
-This package provides a **drop-in replacement** for the [`maxminddb`](https://github.com/maxmind/MaxMind-DB-Reader-python) Python module with the following API:
+This package provides **100% API compatibility** with the official [`maxminddb`](https://github.com/maxmind/MaxMind-DB-Reader-python) Python module:
 
 **Supported:**
 - ✅ `Reader` class with `get()`, `get_with_prefix_len()`, `metadata()`, and `close()` methods
@@ -62,13 +62,13 @@ maturin develop --release
 
 ## Usage
 
-This module can be used as a **drop-in replacement** for `maxminddb`. After installing `maxminddb-rust`, the import works the same:
+This module provides the same API as `maxminddb`, just with a different import name:
 
 ```python
-import maxminddb  # This now uses the Rust implementation!
+import maxminddb_rust  # High-performance Rust implementation
 
 # Open database
-reader = maxminddb.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb")
+reader = maxminddb_rust.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb")
 
 # Lookup single IP
 result = reader.get("8.8.8.8")
@@ -89,7 +89,7 @@ print(f"Database type: {metadata.database_type}")
 print(f"Node count: {metadata.node_count}")
 
 # Context manager support
-with maxminddb.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb") as reader:
+with maxminddb_rust.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb") as reader:
     result = reader.get("1.1.1.1")
     print(result)
 ```
@@ -99,9 +99,9 @@ with maxminddb.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb") as reader:
 The `get_many()` method is an extension not available in the original `maxminddb` module:
 
 ```python
-import maxminddb
+import maxminddb_rust
 
-reader = maxminddb.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb")
+reader = maxminddb_rust.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb")
 
 # Lookup multiple IPs at once
 ips = ["8.8.8.8", "1.1.1.1", "208.67.222.222"]
@@ -116,9 +116,9 @@ for ip, result in zip(ips, results):
 Iterate over all networks in the database:
 
 ```python
-import maxminddb
+import maxminddb_rust
 
-reader = maxminddb.open_database("/var/lib/GeoIP/GeoLite2-Country.mmdb")
+reader = maxminddb_rust.open_database("/var/lib/GeoIP/GeoLite2-Country.mmdb")
 
 # Iterate over all networks in the database
 for network, data in reader:
@@ -130,16 +130,16 @@ for network, data in reader:
 Choose between memory-mapped files (default, best performance) and in-memory mode:
 
 ```python
-import maxminddb
+import maxminddb_rust
 
 # MODE_AUTO: Uses memory-mapped files (default, fastest)
-reader = maxminddb.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb.MODE_AUTO)
+reader = maxminddb_rust.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb_rust.MODE_AUTO)
 
 # MODE_MMAP: Explicitly use memory-mapped files
-reader = maxminddb.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb.MODE_MMAP)
+reader = maxminddb_rust.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb_rust.MODE_MMAP)
 
 # MODE_MEMORY: Load entire database into memory (useful for embedded systems or when file handle limits are a concern)
-reader = maxminddb.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb.MODE_MEMORY)
+reader = maxminddb_rust.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb_rust.MODE_MEMORY)
 ```
 
 ## Examples
@@ -161,12 +161,13 @@ Run any example:
 
 - **API Documentation**: All classes and methods include comprehensive docstrings. Use Python's built-in `help()`:
   ```python
-  import maxminddb
-  help(maxminddb.open_database)
-  help(maxminddb.Reader.get)
+  import maxminddb_rust
+  help(maxminddb_rust.open_database)
+  help(maxminddb_rust.Reader.get)
   ```
-- **Type Hints**: Full type stub file (`maxminddb.pyi`) included for IDE autocomplete and type checking
+- **Type Hints**: Full type stub file (`maxminddb_rust.pyi`) included for IDE autocomplete and type checking
 - **Changelog**: See [CHANGELOG.md](CHANGELOG.md) for version history and release notes
+- **Migration Guide**: See [MIGRATION.md](MIGRATION.md) for migrating from the official `maxminddb` package
 
 ## Benchmarking
 

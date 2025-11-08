@@ -9,7 +9,7 @@ import random
 import socket
 import struct
 import timeit
-import maxminddb
+import maxminddb_rust
 
 def format_number(n):
     """Format number with thousands separator."""
@@ -18,7 +18,7 @@ def format_number(n):
 def run_benchmark(file_path, count, description):
     """Run a single benchmark and return results."""
     random.seed(0)
-    reader = maxminddb.open_database(file_path)
+    reader = maxminddb_rust.open_database(file_path)
 
     def lookup_ip_address():
         ip = socket.inet_ntoa(struct.pack("!L", random.getrandbits(32)))

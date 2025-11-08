@@ -1,8 +1,8 @@
 """
-Type stubs for maxminddb.
+Type stubs for maxminddb_rust.
 
-This module provides a drop-in replacement for the maxminddb Python package,
-implemented in Rust using PyO3 for better performance.
+This module provides a high-performance alternative to the maxminddb Python package,
+implemented in Rust using PyO3 with 100% API compatibility.
 """
 
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
@@ -264,18 +264,18 @@ def open_database(
         ValueError: If an unsupported mode is specified.
 
     Example:
-        >>> import maxminddb
-        >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb')
+        >>> import maxminddb_rust
+        >>> reader = maxminddb_rust.open_database('/path/to/GeoIP2-City.mmdb')
         >>> reader.get('8.8.8.8')
         {'city': {'names': {'en': 'Mountain View'}}, ...}
         >>> reader.close()
 
         >>> # Using context manager
-        >>> with maxminddb.open_database('/path/to/GeoIP2-City.mmdb') as reader:
+        >>> with maxminddb_rust.open_database('/path/to/GeoIP2-City.mmdb') as reader:
         ...     result = reader.get('8.8.8.8')
 
         >>> # Specify mode explicitly
-        >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb',
-        ...                                   mode=maxminddb.MODE_MEMORY)
+        >>> reader = maxminddb_rust.open_database('/path/to/GeoIP2-City.mmdb',
+        ...                                       mode=maxminddb_rust.MODE_MEMORY)
     """
     ...

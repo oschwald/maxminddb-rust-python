@@ -20,14 +20,14 @@ from unittest import mock
 
 import pytest
 
-import maxminddb
+import maxminddb_rust as maxminddb
 
 try:
     import maxminddb.extension
 except ImportError:
     maxminddb.extension = None  # type: ignore[assignment]
 
-from maxminddb import (
+from maxminddb_rust import (
     InvalidDatabaseError,
     MODE_AUTO,
     MODE_FD,

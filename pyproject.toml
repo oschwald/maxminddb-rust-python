@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "maxminddb-rust"
 version = "0.1.0"
-description = "Rust-based Python binding for MaxMind DB - drop-in replacement for maxminddb"
+description = "Rust-based Python binding for MaxMind DB - high-performance alternative to maxminddb"
 readme = "README.md"
 authors = [
     {name = "Gregory Oschwald", email = "oschwald@gmail.com"}
@@ -42,7 +42,7 @@ test = ["pytest>=8.3.5"]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
-include = ["maxminddb.pyi", "py.typed"]
+include = ["maxminddb_rust.pyi", "py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Context manager usage example for maxminddb module.
+Context manager usage example for maxminddb_rust module.
 
-Demonstrates the recommended way to use maxminddb with Python's 'with' statement,
+Demonstrates the recommended way to use maxminddb_rust with Python's 'with' statement,
 which ensures the database is properly closed even if an error occurs.
 """
 
-import maxminddb
+import maxminddb_rust
 
 # Path to your MaxMind database file
 DATABASE_PATH = "/var/lib/GeoIP/GeoIP2-City.mmdb"
@@ -17,7 +17,7 @@ def basic_context_manager():
     print("\n1. Basic context manager usage")
     print("-" * 60)
 
-    with maxminddb.open_database(DATABASE_PATH) as reader:
+    with maxminddb_rust.open_database(DATABASE_PATH) as reader:
         print(f"   Database is open: {not reader.closed}")
 
         result = reader.get("8.8.8.8")
@@ -35,7 +35,7 @@ def context_manager_with_exception_handling():
     print("-" * 60)
 
     try:
-        with maxminddb.open_database(DATABASE_PATH) as reader:
+        with maxminddb_rust.open_database(DATABASE_PATH) as reader:
             print(f"   Database is open: {not reader.closed}")
 
             # Look up some IPs
@@ -68,8 +68,8 @@ def multiple_databases():
     country_db = "/var/lib/GeoIP/GeoLite2-Country.mmdb"
 
     # Open multiple databases with nested context managers
-    with maxminddb.open_database(city_db) as city_reader, \
-         maxminddb.open_database(country_db) as country_reader:
+    with maxminddb_rust.open_database(city_db) as city_reader, \
+         maxminddb_rust.open_database(country_db) as country_reader:
 
         ip = "8.8.8.8"
         print(f"   Looking up {ip} in both databases:")
@@ -96,7 +96,7 @@ def context_manager_with_different_modes():
 
     # MODE_MMAP (default, best performance)
     print("   Using MODE_MMAP (memory-mapped):")
-    with maxminddb.open_database(DATABASE_PATH, mode=maxminddb.MODE_MMAP) as reader:
+    with maxminddb_rust.open_database(DATABASE_PATH, mode=maxminddb_rust.MODE_MMAP) as reader:
         result = reader.get("8.8.8.8")
         if result:
             country = result.get("country", {}).get("names", {}).get("en", "N/A")
@@ -104,7 +104,7 @@ def context_manager_with_different_modes():
 
     # MODE_MEMORY (loads entire database into memory)
     print("   Using MODE_MEMORY (in-memory):")
-    with maxminddb.open_database(DATABASE_PATH, mode=maxminddb.MODE_MEMORY) as reader:
+    with maxminddb_rust.open_database(DATABASE_PATH, mode=maxminddb_rust.MODE_MEMORY) as reader:
         result = reader.get("1.1.1.1")
         if result:
             country = result.get("country", {}).get("names", {}).get("en", "N/A")
