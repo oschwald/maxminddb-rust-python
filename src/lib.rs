@@ -2,7 +2,7 @@ use ::maxminddb as maxminddb_crate;
 use maxminddb_crate::Reader as MaxMindReader;
 use memmap2::Mmap;
 use pyo3::{
-    exceptions::{PyRuntimeError, PyValueError},
+    exceptions::{PyFileNotFoundError, PyIOError, PyRuntimeError, PyValueError},
     prelude::*,
     types::{PyDict, PyModule},
 };
@@ -615,18 +615,26 @@ fn open_database_mmap(path: &str) -> PyResult<Reader> {
         py.allow_threads(|| {
             // Open file and create memory map
             let file = File::open(Path::new(path)).map_err(|e| {
-                InvalidDatabaseError::new_err(format!("Failed to open database file: {e}"))
+                // Distinguish between file I/O errors and database errors
+                match e.kind() {
+                    std::io::ErrorKind::NotFound => {
+                        PyFileNotFoundError::new_err(e.to_string())
+                    }
+                    _ => {
+                        PyIOError::new_err(e.to_string())
+                    }
+                }
             })?;
 
             // Safety: The mmap is read-only and the file won't be modified
             let mmap = unsafe {
                 Mmap::map(&file).map_err(|e| {
-                    InvalidDatabaseError::new_err(format!("Failed to memory-map database: {e}"))
+                    PyIOError::new_err(format!("Failed to memory-map database: {e}"))
                 })?
             };
 
             MaxMindReader::from_source(mmap)
-                .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to open database: {e}")))
+                .map_err(|e| InvalidDatabaseError::new_err(format!("The MaxMind DB file is invalid or corrupted: {e}")))
         })
     })?;
 
@@ -643,16 +651,24 @@ fn open_database_memory(path: &str) -> PyResult<Reader> {
         py.allow_threads(|| {
             // Open file and read entire contents into memory
             let mut file = File::open(Path::new(path)).map_err(|e| {
-                InvalidDatabaseError::new_err(format!("Failed to open database file: {e}"))
+                // Distinguish between file I/O errors and database errors
+                match e.kind() {
+                    std::io::ErrorKind::NotFound => {
+                        PyFileNotFoundError::new_err(e.to_string())
+                    }
+                    _ => {
+                        PyIOError::new_err(e.to_string())
+                    }
+                }
             })?;
 
             let mut buffer = Vec::new();
             file.read_to_end(&mut buffer).map_err(|e| {
-                InvalidDatabaseError::new_err(format!("Failed to read database file: {e}"))
+                PyIOError::new_err(format!("Failed to read database file: {e}"))
             })?;
 
             MaxMindReader::from_source(buffer)
-                .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to open database: {e}")))
+                .map_err(|e| InvalidDatabaseError::new_err(format!("The MaxMind DB file is invalid or corrupted: {e}")))
         })
     })?;
 
