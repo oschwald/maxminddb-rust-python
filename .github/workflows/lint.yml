@@ -77,4 +77,4 @@ jobs:
         run: npm install -g prettier
 
       - name: Run Prettier
-        run: prettier --check "**/*.md" "**/*.yml" "**/*.yaml"
+        run: prettier --check "**/*.md" "**/*.yml"

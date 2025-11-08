@@ -41,10 +41,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest
 
-      - name: Build extension
+      - name: Build and install extension
         run: |
           pip install maturin
-          maturin develop --release
+          maturin build --release
+          pip install --no-index --find-links target/wheels maxminddb-rust
 
       - name: Run tests
         run: pytest -v tests/
