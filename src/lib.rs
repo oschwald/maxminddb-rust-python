@@ -592,26 +592,25 @@ struct ReaderIterator {
 
 impl ReaderIterator {
     fn new(reader: Arc<ReaderSource>) -> PyResult<Self> {
-        let mut items = Vec::new();
         let ip_version = reader.metadata().ip_version;
 
         // For IPv4 databases, iterate over IPv4 range only
         // For IPv6 databases, iterate over IPv6 range only (includes IPv4-mapped addresses)
-        if ip_version == 4 {
-            let ipv4_net = ipnetwork::IpNetwork::from_str("0.0.0.0/0")
-                .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to create IPv4 network: {e}")))?;
-
-            let mut ipv4_items = reader.collect_within(ipv4_net)
-                .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to iterate IPv4: {e}")))?;
-            items.append(&mut ipv4_items);
+        let (network_str, network_type) = if ip_version == 4 {
+            ("0.0.0.0/0", "IPv4")
         } else {
-            let ipv6_net = ipnetwork::IpNetwork::from_str("::/0")
-                .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to create IPv6 network: {e}")))?;
+            ("::/0", "IPv6")
+        };
 
-            let mut ipv6_items = reader.collect_within(ipv6_net)
-                .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to iterate IPv6: {e}")))?;
-            items.append(&mut ipv6_items);
-        }
+        let network = ipnetwork::IpNetwork::from_str(network_str)
+            .map_err(|e| InvalidDatabaseError::new_err(
+                format!("Failed to create {} network: {}", network_type, e)
+            ))?;
+
+        let items = reader.collect_within(network)
+            .map_err(|e| InvalidDatabaseError::new_err(
+                format!("Failed to iterate {}: {}", network_type, e)
+            ))?;
 
         Ok(Self {
             items,
@@ -635,16 +634,12 @@ impl ReaderIterator {
         self.current_index += 1;
 
         // Convert IpNetwork to Python ipaddress.IPv4Network or IPv6Network
-        let network_obj = match network {
-            ipnetwork::IpNetwork::V4(v4) => {
-                let ipaddress = py.import_bound("ipaddress")?;
-                ipaddress.call_method1("IPv4Network", (v4.to_string(),))?
-            }
-            ipnetwork::IpNetwork::V6(v6) => {
-                let ipaddress = py.import_bound("ipaddress")?;
-                ipaddress.call_method1("IPv6Network", (v6.to_string(),))?
-            }
+        let ipaddress = py.import_bound("ipaddress")?;
+        let (class_name, network_str) = match network {
+            ipnetwork::IpNetwork::V4(v4) => ("IPv4Network", v4.to_string()),
+            ipnetwork::IpNetwork::V6(v6) => ("IPv6Network", v6.to_string()),
         };
+        let network_obj = ipaddress.call_method1(class_name, (network_str,))?;
 
         // Convert data to Python object
         let data_obj = data.to_python(py)?;
