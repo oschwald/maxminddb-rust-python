@@ -360,21 +360,48 @@ impl Reader {
         let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Attempt to read from a closed MaxMind DB."))?;
 
         // Release GIL during both parsing and lookup for better concurrency
-        let result: Result<Option<MaxMindValue>, String> = py.allow_threads(|| {
+        type LookupResult = Result<Option<MaxMindValue>, String>;
+        let result: LookupResult = py.allow_threads(|| {
             // Parse IP address - return error for invalid IP
             let ip_addr: IpAddr = ip_str.parse().map_err(|_| {
                 format!("'{}' does not appear to be an IPv4 or IPv6 address", ip_str)
             })?;
 
-            // Perform lookup (no lock needed - reader is thread-safe)
-            Ok(reader.lookup(ip_addr).ok().flatten())
+            // Check for IPv6 address in IPv4-only database
+            let metadata = reader.metadata();
+            if metadata.ip_version == 4 && matches!(ip_addr, IpAddr::V6(_)) {
+                return Err(format!("Error looking up {}. You attempted to look up an IPv6 address in an IPv4-only database", ip_str));
+            }
+
+            // Perform lookup and propagate errors
+            match reader.lookup(ip_addr) {
+                Ok(data) => Ok(data),
+                Err(e) => {
+                    // Convert maxminddb errors to appropriate messages
+                    let error_msg = format!("{}", e);
+                    if error_msg.contains("Invalid database") {
+                        Err(format!("The MaxMind DB file's data section contains bad data (unknown data type or corrupt data)"))
+                    } else if error_msg.contains("AddressNotFoundError") {
+                        Ok(None)
+                    } else {
+                        Err(format!("Database error: {}", error_msg))
+                    }
+                }
+            }
         });
 
         // Handle the result
         match result {
             Ok(Some(data)) => data.to_python(py),
             Ok(None) => Ok(py.None()),
-            Err(e) => Err(PyValueError::new_err(e)),
+            Err(e) => {
+                // Determine exception type based on error message
+                if e.contains("data section contains bad data") {
+                    Err(InvalidDatabaseError::new_err(e))
+                } else {
+                    Err(PyValueError::new_err(e))
+                }
+            }
         }
     }
 
@@ -396,17 +423,36 @@ impl Reader {
         let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Attempt to read from a closed MaxMind DB."))?;
 
         // Release GIL during lookup
-        let result: Result<(Option<MaxMindValue>, usize), String> = py.allow_threads(|| {
+        type PrefixResult = Result<(Option<MaxMindValue>, usize), String>;
+        let result: PrefixResult = py.allow_threads(|| {
             // Parse IP address - return error for invalid IP
             let ip_addr: IpAddr = ip_str.parse().map_err(|_| {
                 format!("'{}' does not appear to be an IPv4 or IPv6 address", ip_str)
             })?;
 
-            // Perform lookup with prefix length (no lock needed - reader is thread-safe)
+            // Check for IPv6 address in IPv4-only database
+            let metadata = reader.metadata();
+            if metadata.ip_version == 4 && matches!(ip_addr, IpAddr::V6(_)) {
+                return Err(format!("Error looking up {}. You attempted to look up an IPv6 address in an IPv4-only database", ip_str));
+            }
+
+            // Perform lookup with prefix length and propagate errors
             match reader.lookup_prefix(ip_addr) {
-                Ok((Some(data), prefix)) => Ok((Some(data), prefix)),
-                Ok((None, _)) => Ok((None, 0)),
-                Err(_) => Ok((None, 0)),
+                Ok((data, prefix)) => Ok((data, prefix)),
+                Err(e) => {
+                    // Convert maxminddb errors to appropriate messages
+                    let error_msg = format!("{}", e);
+                    if error_msg.contains("Invalid database") {
+                        Err(format!("The MaxMind DB file's data section contains bad data (unknown data type or corrupt data)"))
+                    } else if error_msg.contains("AddressNotFoundError") {
+                        // AddressNotFoundError still provides a prefix length
+                        Ok((None, 0))
+                    } else if error_msg.contains("IPv6 address in an IPv4-only database") {
+                        Err(format!("Error looking up {}. You attempted to look up an IPv6 address in an IPv4-only database", ip_str))
+                    } else {
+                        Err(format!("Database error: {}", error_msg))
+                    }
+                }
             }
         });
 
@@ -417,7 +463,14 @@ impl Reader {
                 Ok((py_obj, prefix_len))
             }
             Ok((None, prefix_len)) => Ok((py.None(), prefix_len)),
-            Err(e) => Err(PyValueError::new_err(e)),
+            Err(e) => {
+                // Determine exception type based on error message
+                if e.contains("data section contains bad data") {
+                    Err(InvalidDatabaseError::new_err(e))
+                } else {
+                    Err(PyValueError::new_err(e))
+                }
+            }
         }
     }
 
