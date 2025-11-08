@@ -1,10 +1,10 @@
 use ::maxminddb as maxminddb_crate;
-use maxminddb_crate::{Reader as MaxMindReader, Within, WithinItem};
+use maxminddb_crate::{MaxMindDbError, Reader as MaxMindReader, Within, WithinItem};
 use memmap2::Mmap;
 use pyo3::{
-    exceptions::{PyFileNotFoundError, PyIOError, PyOSError, PyRuntimeError, PyValueError},
+    exceptions::{PyFileNotFoundError, PyIOError, PyOSError, PyRuntimeError, PyTypeError, PyValueError},
     prelude::*,
-    types::{PyBytes, PyDict, PyList, PyModule},
+    types::{PyBytes, PyDict, PyList, PyModule, PyString},
     conversion::IntoPyObjectExt,
 };
 use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
@@ -341,52 +341,24 @@ impl Reader {
         }
 
         // Parse IP address - support string or ipaddress objects
-        let ip_str = parse_ip_address(ip_address)?;
+        let parsed_ip = parse_ip_address(ip_address)?;
         let reader = self.get_reader()?;
+        let metadata = reader.metadata();
 
-        // Release GIL during both parsing and lookup for better concurrency
-        type LookupResult = Result<Option<MaxMindValue>, String>;
-        let result: LookupResult = py.allow_threads(|| {
-            // Parse IP address - return error for invalid IP
-            let ip_addr: IpAddr = ip_str.parse().map_err(|_| {
-                format!("'{}' does not appear to be an IPv4 or IPv6 address", ip_str)
-            })?;
+        if metadata.ip_version == 4 && matches!(parsed_ip.addr, IpAddr::V6(_)) {
+            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip.repr)));
+        }
 
-            // Check for IPv6 address in IPv4-only database
-            let metadata = reader.metadata();
-            if metadata.ip_version == 4 && matches!(ip_addr, IpAddr::V6(_)) {
-                return Err(ipv6_in_ipv4_error(&ip_str));
-            }
+        // Release GIL during lookup for better concurrency
+        let lookup_result = py.allow_threads(|| reader.lookup(parsed_ip.addr));
 
-            // Perform lookup and propagate errors
-            match reader.lookup(ip_addr) {
-                Ok(data) => Ok(data),
-                Err(e) => {
-                    // Convert maxminddb errors to appropriate messages
-                    let error_msg = format!("{}", e);
-                    if error_msg.contains("Invalid database") {
-                        Err(ERR_BAD_DATA.to_string())
-                    } else if error_msg.contains("AddressNotFoundError") {
-                        Ok(None)
-                    } else {
-                        Err(format!("Database error: {}", error_msg))
-                    }
-                }
-            }
-        });
-
-        // Handle the result
-        match result {
+        match lookup_result {
             Ok(Some(data)) => data.to_python(py),
             Ok(None) => Ok(py.None()),
-            Err(e) => {
-                // Determine exception type based on error message
-                if e.contains("data section contains bad data") {
-                    Err(InvalidDatabaseError::new_err(e))
-                } else {
-                    Err(PyValueError::new_err(e))
-                }
+            Err(MaxMindDbError::InvalidDatabase(_) | MaxMindDbError::Decoding(_)) => {
+                Err(InvalidDatabaseError::new_err(ERR_BAD_DATA))
             }
+            Err(err) => Err(PyValueError::new_err(format!("Database error: {err}"))),
         }
     }
 
@@ -401,58 +373,27 @@ impl Reader {
         }
 
         // Parse IP address - support string or ipaddress objects
-        let ip_str = parse_ip_address(ip_address)?;
+        let parsed_ip = parse_ip_address(ip_address)?;
         let reader = self.get_reader()?;
+        let metadata = reader.metadata();
+
+        if metadata.ip_version == 4 && matches!(parsed_ip.addr, IpAddr::V6(_)) {
+            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip.repr)));
+        }
 
         // Release GIL during lookup
-        type PrefixResult = Result<(Option<MaxMindValue>, usize), String>;
-        let result: PrefixResult = py.allow_threads(|| {
-            // Parse IP address - return error for invalid IP
-            let ip_addr: IpAddr = ip_str.parse().map_err(|_| {
-                format!("'{}' does not appear to be an IPv4 or IPv6 address", ip_str)
-            })?;
+        let result = py.allow_threads(|| reader.lookup_prefix(parsed_ip.addr));
 
-            // Check for IPv6 address in IPv4-only database
-            let metadata = reader.metadata();
-            if metadata.ip_version == 4 && matches!(ip_addr, IpAddr::V6(_)) {
-                return Err(ipv6_in_ipv4_error(&ip_str));
-            }
-
-            // Perform lookup with prefix length and propagate errors
-            match reader.lookup_prefix(ip_addr) {
-                Ok((data, prefix)) => Ok((data, prefix)),
-                Err(e) => {
-                    // Convert maxminddb errors to appropriate messages
-                    let error_msg = format!("{}", e);
-                    if error_msg.contains("Invalid database") {
-                        Err(ERR_BAD_DATA.to_string())
-                    } else if error_msg.contains("AddressNotFoundError") {
-                        // AddressNotFoundError still provides a prefix length
-                        Ok((None, 0))
-                    } else if error_msg.contains("IPv6 address in an IPv4-only database") {
-                        Err(ipv6_in_ipv4_error(&ip_str))
-                    } else {
-                        Err(format!("Database error: {}", error_msg))
-                    }
-                }
-            }
-        });
-
-        // Handle the result
         match result {
             Ok((Some(data), prefix_len)) => {
                 let py_obj = data.to_python(py)?;
                 Ok((py_obj, prefix_len))
             }
             Ok((None, prefix_len)) => Ok((py.None(), prefix_len)),
-            Err(e) => {
-                // Determine exception type based on error message
-                if e.contains("data section contains bad data") {
-                    Err(InvalidDatabaseError::new_err(e))
-                } else {
-                    Err(PyValueError::new_err(e))
-                }
+            Err(MaxMindDbError::InvalidDatabase(_) | MaxMindDbError::Decoding(_)) => {
+                Err(InvalidDatabaseError::new_err(ERR_BAD_DATA))
             }
+            Err(err) => Err(PyValueError::new_err(format!("Database error: {err}"))),
         }
     }
 
@@ -465,31 +406,40 @@ impl Reader {
         }
 
         let reader = self.get_reader()?;
+        let metadata = reader.metadata();
+
+        let mut parsed_ips = Vec::with_capacity(ips.len());
+        for ip in &ips {
+            let ip_addr: IpAddr = ip
+                .parse()
+                .map_err(|_| PyValueError::new_err(format!("Invalid IP address: {ip}")))?;
+
+            if metadata.ip_version == 4 && matches!(ip_addr, IpAddr::V6(_)) {
+                return Err(PyValueError::new_err(ipv6_in_ipv4_error(ip)));
+            }
+
+            parsed_ips.push(ip_addr);
+        }
 
         // Release GIL during all lookups
-        let results: Vec<PyResult<Option<MaxMindValue>>> = py.allow_threads(|| {
-            ips.iter()
-                .map(|ip| {
-                    let ip_addr: IpAddr = ip.parse().map_err(|_| {
-                        PyValueError::new_err(format!("Invalid IP address: {ip}"))
-                    })?;
+        let results: Vec<Result<Option<MaxMindValue>, MaxMindDbError>> =
+            py.allow_threads(|| parsed_ips.iter().map(|ip| reader.lookup(*ip)).collect());
 
-                    // Perform lookup (no lock needed - reader is thread-safe)
-                    reader
-                        .lookup(ip_addr)
-                        .map_err(|e| InvalidDatabaseError::new_err(format!("Lookup error: {e}")))
-                })
-                .collect()
-        });
+        let mut objects = Vec::with_capacity(results.len());
+        for result in results {
+            match result {
+                Ok(Some(data)) => objects.push(data.to_python(py)?),
+                Ok(None) => objects.push(py.None()),
+                Err(MaxMindDbError::InvalidDatabase(_) | MaxMindDbError::Decoding(_)) => {
+                    return Err(InvalidDatabaseError::new_err(ERR_BAD_DATA));
+                }
+                Err(err) => {
+                    return Err(PyValueError::new_err(format!("Database error: {err}")));
+                }
+            }
+        }
 
-        // Convert results to Python objects
-        results
-            .into_iter()
-            .map(|result| match result? {
-                Some(data) => data.to_python(py),
-                None => Ok(py.None()),
-            })
-            .collect()
+        Ok(objects)
     }
 
     /// Metadata about the database
@@ -669,22 +619,29 @@ impl ReaderWithin {
     }
 }
 
+struct ParsedIp {
+    repr: String,
+    addr: IpAddr,
+}
+
 /// Helper function to parse IP address from string or ipaddress objects
-fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<String> {
-    // Check if it's a string type
-    if ip_address.is_instance_of::<pyo3::types::PyString>() {
-        return ip_address.extract::<String>();
+fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<ParsedIp> {
+    if let Ok(py_str) = ip_address.downcast::<PyString>() {
+        let repr = py_str.to_str()?.to_owned();
+        let addr = repr.parse().map_err(|_| {
+            PyValueError::new_err(format!("'{}' does not appear to be an IPv4 or IPv6 address", repr))
+        })?;
+        return Ok(ParsedIp { repr, addr });
     }
 
-    // Check if it's an ipaddress object by checking for IPv4Address or IPv6Address type
-    // Try to get the string representation from ipaddress.IPv4Address or IPv6Address
+    // Check if it's an ipaddress.IPv4Address or IPv6Address
     let type_name = ip_address.get_type().name()?;
     if type_name == "IPv4Address" || type_name == "IPv6Address" {
-        return Ok(ip_address.str()?.to_string());
+        let addr = ip_address.extract::<IpAddr>()?;
+        let repr = ip_address.str()?.to_string();
+        return Ok(ParsedIp { repr, addr });
     }
 
-    // Not a valid type
-    use pyo3::exceptions::PyTypeError;
     Err(PyTypeError::new_err(
         "argument 1 must be a string or ipaddress object",
     ))
