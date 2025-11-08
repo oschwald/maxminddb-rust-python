@@ -360,18 +360,21 @@ impl Reader {
         let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Database is closed"))?;
 
         // Release GIL during both parsing and lookup for better concurrency
-        let result: Option<MaxMindValue> = py.allow_threads(|| {
-            // Parse IP address
-            let ip_addr: IpAddr = ip_str.parse().ok()?;
+        let result: Result<Option<MaxMindValue>, String> = py.allow_threads(|| {
+            // Parse IP address - return error for invalid IP
+            let ip_addr: IpAddr = ip_str.parse().map_err(|_| {
+                format!("'{}' does not appear to be an IPv4 or IPv6 address", ip_str)
+            })?;
 
             // Perform lookup (no lock needed - reader is thread-safe)
-            reader.lookup(ip_addr).ok().flatten()
+            Ok(reader.lookup(ip_addr).ok().flatten())
         });
 
-        // Convert result to Python object
+        // Handle the result
         match result {
-            Some(data) => data.to_python(py),
-            None => Ok(py.None()),
+            Ok(Some(data)) => data.to_python(py),
+            Ok(None) => Ok(py.None()),
+            Err(e) => Err(PyValueError::new_err(e)),
         }
     }
 
@@ -393,28 +396,29 @@ impl Reader {
         let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Database is closed"))?;
 
         // Release GIL during lookup
-        let (result, prefix_len): (Option<MaxMindValue>, usize) = py.allow_threads(|| {
-            // Parse IP address
-            let ip_addr: IpAddr = match ip_str.parse() {
-                Ok(addr) => addr,
-                Err(_) => return (None, 0),
-            };
+        let result: Result<(Option<MaxMindValue>, usize), String> = py.allow_threads(|| {
+            // Parse IP address - return error for invalid IP
+            let ip_addr: IpAddr = ip_str.parse().map_err(|_| {
+                format!("'{}' does not appear to be an IPv4 or IPv6 address", ip_str)
+            })?;
 
             // Perform lookup with prefix length (no lock needed - reader is thread-safe)
             match reader.lookup_prefix(ip_addr) {
-                Ok((Some(data), prefix)) => (Some(data), prefix),
-                Ok((None, _)) => (None, 0),
-                Err(_) => (None, 0),
+                Ok((Some(data), prefix)) => Ok((Some(data), prefix)),
+                Ok((None, _)) => Ok((None, 0)),
+                Err(_) => Ok((None, 0)),
             }
         });
 
-        // Convert result to Python object
-        let py_obj = match result {
-            Some(data) => data.to_python(py)?,
-            None => py.None(),
-        };
-
-        Ok((py_obj, prefix_len))
+        // Handle the result
+        match result {
+            Ok((Some(data), prefix_len)) => {
+                let py_obj = data.to_python(py)?;
+                Ok((py_obj, prefix_len))
+            }
+            Ok((None, prefix_len)) => Ok((py.None(), prefix_len)),
+            Err(e) => Err(PyValueError::new_err(e)),
+        }
     }
 
     /// Batch lookup multiple IP addresses at once to reduce call overhead
