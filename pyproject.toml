@@ -1,19 +1,41 @@
 [build-system]
-requires = ["maturin>=1.8,<2.0"]
+requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "maxminddb-pyo3"
+name = "maxminddb-rust"
+version = "0.1.0"
+description = "Rust-based Python binding for MaxMind DB - drop-in replacement for maxminddb"
+readme = "README.md"
+authors = [
+    {name = "Gregory Oschwald", email = "oschwald@gmail.com"}
+]
+license = {text = "ISC"}
 requires-python = ">=3.8"
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: ISC License (ISCL)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Database",
+    "Topic :: Internet",
 ]
-dynamic = ["version"]
-dependencies = [
-    "maturin>=1.8.3",
-]
+keywords = ["maxmind", "geoip", "geolocation", "ip-address", "mmdb"]
+
+[project.urls]
+Homepage = "https://github.com/oschwald/maxminddb-pyo3"
+Repository = "https://github.com/oschwald/maxminddb-pyo3"
+"Bug Tracker" = "https://github.com/oschwald/maxminddb-pyo3/issues"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]

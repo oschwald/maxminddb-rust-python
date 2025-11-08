@@ -64,9 +64,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "maxminddb-pyo3"
+name = "maxminddb-rust"
 version = "0.1.0"
 dependencies = [
+ "ipnetwork",
  "maxminddb",
  "memmap2",
  "pyo3",

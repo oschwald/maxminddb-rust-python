@@ -1,13 +1,18 @@
 [package]
-name = "maxminddb-pyo3"
+name = "maxminddb-rust"
 version = "0.1.0"
 edition = "2021"
+authors = ["Gregory Oschwald <oschwald@gmail.com>"]
+description = "Rust-based Python binding for MaxMind DB - drop-in replacement for maxminddb"
+license = "ISC"
+repository = "https://github.com/oschwald/maxminddb-pyo3"
 
 [lib]
-name = "maxminddb_pyo3"
+name = "maxminddb"
 crate-type = ["cdylib"]
 
 [dependencies]
+ipnetwork = "0.21"
 maxminddb = "0.26.0"
 memmap2 = "0.9"
 pyo3 = { version = "0.24.0", features = ["extension-module"] }

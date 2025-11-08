@@ -6,7 +6,7 @@ import socket
 import struct
 import timeit
 
-import maxminddb_pyo3
+import maxminddb
 
 parser = argparse.ArgumentParser(description="Benchmark maxminddb batch lookups.")
 parser.add_argument("--count", default=250000, type=int, help="number of lookups")
@@ -16,7 +16,7 @@ parser.add_argument("--file", default="GeoIP2-City.mmdb", help="path to mmdb fil
 args = parser.parse_args()
 
 random.seed(0)
-reader = maxminddb_pyo3.open_database(args.file)
+reader = maxminddb.open_database(args.file)
 
 # Pre-generate IPs
 ips = [socket.inet_ntoa(struct.pack("!L", random.getrandbits(32))) for _ in range(args.batch_size)]
