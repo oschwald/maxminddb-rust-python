@@ -42,7 +42,7 @@ enum MaxMindValue {
 
 impl MaxMindValue {
     /// Convert MaxMindValue to Python object
-    fn to_python(&self, py: Python) -> PyResult<PyObject> {
+    fn to_python(&self, py: Python) -> PyResult<Py<PyAny>> {
         match self {
             MaxMindValue::Array(arr) => {
                 let elements: Vec<_> = arr.iter()
@@ -251,7 +251,7 @@ struct Metadata {
 #[pymethods]
 impl Metadata {
     #[getter]
-    fn description(&self, py: Python) -> PyResult<PyObject> {
+    fn description(&self, py: Python) -> PyResult<Py<PyAny>> {
         // Convert BTreeMap<String, String> to Python dict
         let dict = PyDict::new(py);
         for (k, v) in &self.description_dict {
@@ -261,7 +261,7 @@ impl Metadata {
     }
 
     #[getter]
-    fn languages(&self, py: Python) -> PyResult<PyObject> {
+    fn languages(&self, py: Python) -> PyResult<Py<PyAny>> {
         // Convert Vec<String> to Python list
         self.languages_list.clone().into_py_any(py)
     }
@@ -334,7 +334,7 @@ impl Reader {
     }
 
     #[inline]
-    fn get(&self, py: Python, ip_address: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    fn get(&self, py: Python, ip_address: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         // Quick check if database is closed
         if self.closed.load(Ordering::Acquire) {
             return Err(PyValueError::new_err(ERR_CLOSED_DB));
@@ -350,7 +350,7 @@ impl Reader {
         }
 
         // Release GIL during lookup for better concurrency
-        let lookup_result = py.allow_threads(|| reader.lookup(parsed_ip.addr));
+        let lookup_result = py.detach(|| reader.lookup(parsed_ip.addr));
 
         match lookup_result {
             Ok(Some(data)) => data.to_python(py),
@@ -366,7 +366,7 @@ impl Reader {
         &self,
         py: Python,
         ip_address: &Bound<'_, PyAny>,
-    ) -> PyResult<(PyObject, usize)> {
+    ) -> PyResult<(Py<PyAny>, usize)> {
         // Quick check if database is closed
         if self.closed.load(Ordering::Acquire) {
             return Err(PyValueError::new_err(ERR_CLOSED_DB));
@@ -382,7 +382,7 @@ impl Reader {
         }
 
         // Release GIL during lookup
-        let result = py.allow_threads(|| reader.lookup_prefix(parsed_ip.addr));
+        let result = py.detach(|| reader.lookup_prefix(parsed_ip.addr));
 
         match result {
             Ok((Some(data), prefix_len)) => {
@@ -399,7 +399,7 @@ impl Reader {
 
     /// Batch lookup multiple IP addresses at once to reduce call overhead
     /// This is an extension method not in the original maxminddb module
-    fn get_many(&self, py: Python, ips: Vec<String>) -> PyResult<Vec<PyObject>> {
+    fn get_many(&self, py: Python, ips: Vec<String>) -> PyResult<Vec<Py<PyAny>>> {
         // Quick check if database is closed
         if self.closed.load(Ordering::Acquire) {
             return Err(PyValueError::new_err(ERR_CLOSED_DB));
@@ -423,7 +423,7 @@ impl Reader {
 
         // Release GIL during all lookups
         let results: Vec<Result<Option<MaxMindValue>, MaxMindDbError>> =
-            py.allow_threads(|| parsed_ips.iter().map(|ip| reader.lookup(*ip)).collect());
+            py.detach(|| parsed_ips.iter().map(|ip| reader.lookup(*ip)).collect());
 
         let mut objects = Vec::with_capacity(results.len());
         for result in results {
@@ -569,7 +569,7 @@ impl ReaderIterator {
         slf
     }
 
-    fn __next__(&mut self, py: Python) -> PyResult<Option<(PyObject, PyObject)>> {
+    fn __next__(&mut self, py: Python) -> PyResult<Option<(Py<PyAny>, Py<PyAny>)>> {
         let next_item = match self.iter.next() {
             Some(result) => result.map_err(|e| InvalidDatabaseError::new_err(format!("Iteration error: {}", e)))?,
             None => return Ok(None),
@@ -626,7 +626,7 @@ struct ParsedIp {
 
 /// Helper function to parse IP address from string or ipaddress objects
 fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<ParsedIp> {
-    if let Ok(py_str) = ip_address.downcast::<PyString>() {
+    if let Ok(py_str) = ip_address.cast::<PyString>() {
         let repr = py_str.to_str()?.to_owned();
         let addr = repr.parse().map_err(|_| {
             PyValueError::new_err(format!("'{}' does not appear to be an IPv4 or IPv6 address", repr))
@@ -673,8 +673,8 @@ fn create_reader(source: ReaderSource) -> Reader {
 /// Open a MaxMind DB using memory-mapped files (MODE_MMAP)
 fn open_database_mmap(path: &str) -> PyResult<Reader> {
     // Release GIL during file I/O operation
-    let reader = Python::with_gil(|py| {
-        py.allow_threads(|| {
+    let reader = Python::attach(|py| {
+        py.detach(|| {
             let file = open_file(path)?;
 
             // Safety: The mmap is read-only and the file won't be modified
@@ -695,8 +695,8 @@ fn open_database_mmap(path: &str) -> PyResult<Reader> {
 /// Open a MaxMind DB by loading entire file into memory (MODE_MEMORY)
 fn open_database_memory(path: &str) -> PyResult<Reader> {
     // Release GIL during file I/O operation
-    let reader = Python::with_gil(|py| {
-        py.allow_threads(|| {
+    let reader = Python::attach(|py| {
+        py.detach(|| {
             let mut file = open_file(path)?;
 
             let mut buffer = Vec::new();
