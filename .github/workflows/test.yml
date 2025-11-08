@@ -32,7 +32,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a # master
+        uses: dtolnay/rust-toolchain@6d653acede28d24f02e3cd41383119e8b1b35921 # master
         with:
           toolchain: stable
 
