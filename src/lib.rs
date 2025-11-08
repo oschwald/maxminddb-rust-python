@@ -240,7 +240,7 @@ impl ReaderSource {
 }
 
 /// Metadata about the MaxMind DB database
-#[pyclass]
+#[pyclass(module = "maxminddb.extension")]
 struct Metadata {
     #[pyo3(get)]
     binary_format_major_version: u16,
@@ -291,7 +291,7 @@ impl Metadata {
 
 /// A Python wrapper around the MaxMind DB reader.
 /// Supports both memory-mapped files (MODE_MMAP) and in-memory (MODE_MEMORY) modes.
-#[pyclass]
+#[pyclass(module = "maxminddb.extension")]
 struct Reader {
     reader: Arc<Mutex<Option<Arc<ReaderSource>>>>,
     closed: Arc<AtomicBool>,
@@ -335,7 +335,7 @@ impl Reader {
                 "MODE_FD not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY"
             )),
             _ => Err(PyValueError::new_err(format!(
-                "Unknown mode {actual_mode}, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY"
+                "Unsupported open mode ({actual_mode})"
             ))),
         }
     }
@@ -528,7 +528,7 @@ impl Reader {
 }
 
 /// Iterator for Reader that yields (network, record) tuples
-#[pyclass]
+#[pyclass(module = "maxminddb.extension")]
 struct ReaderIterator {
     items: Vec<(ipnetwork::IpNetwork, MaxMindValue)>,
     current_index: usize,
@@ -597,19 +597,22 @@ impl ReaderIterator {
 
 /// Helper function to parse IP address from string or ipaddress objects
 fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<String> {
-    // Try to extract as string first
-    if let Ok(s) = ip_address.extract::<String>() {
-        return Ok(s);
+    // Check if it's a string type
+    if ip_address.is_instance_of::<pyo3::types::PyString>() {
+        return ip_address.extract::<String>();
     }
 
+    // Check if it's an ipaddress object by checking for IPv4Address or IPv6Address type
     // Try to get the string representation from ipaddress.IPv4Address or IPv6Address
-    // These objects have a __str__ method
-    if let Ok(s) = ip_address.str() {
-        return Ok(s.to_string());
+    let type_name = ip_address.get_type().name()?;
+    if type_name == "IPv4Address" || type_name == "IPv6Address" {
+        return Ok(ip_address.str()?.to_string());
     }
 
-    Err(PyValueError::new_err(
-        "ip_address must be a string or ipaddress object",
+    // Not a valid type
+    use pyo3::exceptions::PyTypeError;
+    Err(PyTypeError::new_err(
+        "argument 1 must be a string or ipaddress object",
     ))
 }
 
