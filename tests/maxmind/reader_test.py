@@ -679,27 +679,15 @@ def has_maxminddb_extension() -> bool:
     )
 
 
-@unittest.skipIf(
-    not has_maxminddb_extension() and not os.environ.get("MM_FORCE_EXT_TESTS"),
-    "No C extension module found. Skipping tests",
-)
 class TestExtensionReader(BaseTestReader):
     mode = MODE_MMAP_EXT
-
-    if has_maxminddb_extension():
-        reader_class = maxminddb.Reader
+    reader_class = maxminddb.Reader
 
 
-@unittest.skipIf(
-    not has_maxminddb_extension() and not os.environ.get("MM_FORCE_EXT_TESTS"),
-    "No C extension module found. Skipping tests",
-)
 class TestExtensionReaderWithIPObjects(BaseTestReader):
     mode = MODE_MMAP_EXT
     use_ip_objects = True
-
-    if has_maxminddb_extension():
-        reader_class = maxminddb.Reader
+    reader_class = maxminddb.Reader
 
 
 class TestAutoReader(BaseTestReader):
