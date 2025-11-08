@@ -157,6 +157,59 @@ Run the included benchmarks (after building from source):
 .venv/bin/python benchmark_batch.py --file /var/lib/GeoIP/GeoIP2-City.mmdb --batch-size 100
 ```
 
+## Testing
+
+### Running Tests
+
+This project includes upstream compatibility tests from MaxMind-DB-Reader-python to ensure API compatibility.
+
+```bash
+# Initialize test data submodule (first time only)
+git submodule update --init --recursive
+
+# Install test dependencies
+uv pip install pytest
+
+# Run all tests
+uv run pytest
+
+# Run only upstream compatibility tests
+uv run pytest tests/maxmind/
+```
+
+### Upstream Test License
+
+The tests in `tests/maxmind/` are copyright MaxMind, Inc. and licensed under Apache License 2.0. See `tests/maxmind/UPSTREAM_LICENSE` for full license text.
+
+The test data in `tests/data/` is from the [MaxMind-DB repository](https://github.com/maxmind/MaxMind-DB) and is licensed under Creative Commons Attribution-ShareAlike 3.0.
+
+### Syncing Upstream Tests
+
+To sync with latest upstream tests from MaxMind-DB-Reader-python:
+
+```bash
+# Update local copy of upstream repo
+cd /path/to/MaxMind-DB-Reader-python
+git pull
+
+# Copy updated test file
+cp tests/reader_test.py /path/to/maxminddb-pyo3/tests/maxmind/
+
+# Re-apply required adaptations:
+# 1. Add copyright header
+# 2. Update imports: from maxminddb.const import (...) → from maxminddb import (...)
+# 3. Update imports: from maxminddb.reader import Reader → from maxminddb import Reader
+# 4. Add: import pytest
+# 5. Add @pytest.mark.skip to TestFileReader and TestFDReader
+# 6. Replace maxminddb.reader.Reader with maxminddb.Reader
+# 7. Replace maxminddb.extension.Reader with maxminddb.Reader
+# 8. Update test data paths: tests/data/ → tests/data/test-data/
+
+# Update test data submodule
+cd /path/to/maxminddb-pyo3
+git submodule update --remote tests/data
+```
+
 ## License
 
 ISC License - see LICENSE file for details.
