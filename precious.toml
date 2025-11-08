@@ -1,0 +1,60 @@
+exclude = [
+  "target/**/*",
+  "tests/__pycache__/**/*",
+  "tests/maxmind/__pycache__/**/*",
+  "tests/data/**/*",
+  ".pytest_cache/**/*",
+  "todo.md",
+]
+
+[commands.clippy]
+type = "lint"
+include = "**/*.rs"
+invoke = "once"
+path-args = "none"
+cmd = ["cargo", "clippy", "--lib", "--all-features", "--", "-D", "warnings"]
+ok-exit-codes = [0]
+lint-failure-exit-codes = [101]
+expect-stderr = true
+
+[commands.rustfmt]
+type = "both"
+include = "**/*.rs"
+invoke = "once"
+path-args = "none"
+cmd = ["cargo", "fmt", "--all"]
+lint-flags = "--check"
+ok-exit-codes = [0]
+lint-failure-exit-codes = [1]
+
+[commands.ruff-lint]
+type = "both"
+include = "**/*.py"
+invoke = "once"
+path-args = "dot"
+cmd = ["ruff", "check"]
+tidy-flags = "--fix"
+ok-exit-codes = [0]
+lint-failure-exit-codes = [1]
+
+[commands.ruff-format]
+type = "both"
+include = "**/*.py"
+invoke = "once"
+path-args = "dot"
+cmd = ["ruff", "format"]
+lint-flags = "--check"
+ok-exit-codes = [0]
+lint-failure-exit-codes = [1]
+
+[commands.prettier]
+type = "both"
+include = ["**/*.md", "**/*.yml", "**/*.yaml"]
+invoke = "once"
+path-args = "file"
+cmd = ["prettier"]
+lint-flags = "--check"
+tidy-flags = "--write"
+ok-exit-codes = [0]
+lint-failure-exit-codes = [1]
+expect-stderr = true

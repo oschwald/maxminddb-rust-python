@@ -241,6 +241,51 @@ cd /path/to/maxminddb-pyo3
 git submodule update --remote tests/data
 ```
 
+## Development
+
+### Code Quality Tools
+
+This project uses [precious](https://github.com/houseabsolute/precious/) to manage linters and formatters. Install precious and run:
+
+```bash
+# Lint all files
+precious lint --all
+
+# Format all files
+precious tidy --all
+
+# Lint specific files
+precious lint path/to/file.py
+
+# Run a specific linter
+precious lint --all --command rustfmt
+```
+
+Individual tools can also be run directly:
+
+```bash
+# Rust
+cargo clippy --lib --all-features -- -D warnings
+cargo fmt --all
+
+# Python
+ruff check .
+ruff format .
+
+# Markdown/YAML
+prettier --check "**/*.md" "**/*.yml"
+prettier --write "**/*.md" "**/*.yml"
+```
+
+### Continuous Integration
+
+GitHub Actions workflows automatically run:
+
+- **Tests** on Python 3.9-3.13 across Linux, macOS, and Windows
+- **Linters** including clippy, rustfmt, ruff, and prettier
+- **Security scans** with CodeQL and zizmor
+- **Dependency updates** via Dependabot
+
 ## License
 
 ISC License - see LICENSE file for details.
