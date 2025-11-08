@@ -33,9 +33,9 @@ classifiers = [
 keywords = ["maxmind", "geoip", "geolocation", "ip-address", "mmdb"]
 
 [project.urls]
-Homepage = "https://github.com/oschwald/maxminddb-pyo3"
-Repository = "https://github.com/oschwald/maxminddb-pyo3"
-"Bug Tracker" = "https://github.com/oschwald/maxminddb-pyo3/issues"
+Homepage = "https://github.com/oschwald/maxminddb-rust-python"
+Repository = "https://github.com/oschwald/maxminddb-rust-python"
+"Bug Tracker" = "https://github.com/oschwald/maxminddb-rust-python/issues"
 
 [project.optional-dependencies]
 test = ["pytest>=8.3.5"]

@@ -209,7 +209,7 @@ import maxminddb_rust as maxminddb  # Use alias for minimal test changes
 
 ## Getting Help
 
-- **GitHub Issues**: https://github.com/oschwald/maxminddb-pyo3/issues
+- **GitHub Issues**: https://github.com/oschwald/maxminddb-rust-python/issues
 - **API Documentation**: Use `help(maxminddb_rust)` in Python
 - **Examples**: See the `examples/` directory in the repository
 

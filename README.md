@@ -224,7 +224,7 @@ cd /path/to/MaxMind-DB-Reader-python
 git pull
 
 # Copy updated test file
-cp tests/reader_test.py /path/to/maxminddb-pyo3/tests/maxmind/
+cp tests/reader_test.py /path/to/maxminddb-rust-python/tests/maxmind/
 
 # Re-apply required adaptations:
 # 1. Add copyright header
@@ -237,7 +237,7 @@ cp tests/reader_test.py /path/to/maxminddb-pyo3/tests/maxmind/
 # 8. Update test data paths: tests/data/ → tests/data/test-data/
 
 # Update test data submodule
-cd /path/to/maxminddb-pyo3
+cd /path/to/maxminddb-rust-python
 git submodule update --remote tests/data
 ```
 

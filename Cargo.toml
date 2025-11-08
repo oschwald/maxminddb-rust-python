@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Gregory Oschwald <oschwald@gmail.com>"]
 description = "Rust-based Python binding for MaxMind DB - high-performance alternative to maxminddb"
 license = "ISC"
-repository = "https://github.com/oschwald/maxminddb-pyo3"
+repository = "https://github.com/oschwald/maxminddb-rust-python"
 
 [lib]
 name = "maxminddb_rust"
