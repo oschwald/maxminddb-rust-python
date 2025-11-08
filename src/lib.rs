@@ -190,6 +190,10 @@ const MODE_FILE: i32 = 4;
 const MODE_MEMORY: i32 = 8;
 const MODE_FD: i32 = 16;
 
+// Error message constants
+const ERR_CLOSED_DB: &str = "Attempt to read from a closed MaxMind DB.";
+const ERR_BAD_DATA: &str = "The MaxMind DB file's data section contains bad data (unknown data type or corrupt data)";
+
 /// Enum to handle different reader source types
 enum ReaderSource {
     Mmap(MaxMindReader<Mmap>),
@@ -349,15 +353,12 @@ impl Reader {
     fn get(&self, py: Python, ip_address: &Bound<'_, PyAny>) -> PyResult<PyObject> {
         // Quick check if database is closed
         if self.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err("Attempt to read from a closed MaxMind DB."));
+            return Err(PyValueError::new_err(ERR_CLOSED_DB));
         }
 
         // Parse IP address - support string or ipaddress objects
         let ip_str = parse_ip_address(ip_address)?;
-
-        // Clone the reader Arc for use without holding the lock
-        let reader_opt = self.reader.lock().unwrap().clone();
-        let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Attempt to read from a closed MaxMind DB."))?;
+        let reader = self.get_reader()?;
 
         // Release GIL during both parsing and lookup for better concurrency
         type LookupResult = Result<Option<MaxMindValue>, String>;
@@ -370,7 +371,7 @@ impl Reader {
             // Check for IPv6 address in IPv4-only database
             let metadata = reader.metadata();
             if metadata.ip_version == 4 && matches!(ip_addr, IpAddr::V6(_)) {
-                return Err(format!("Error looking up {}. You attempted to look up an IPv6 address in an IPv4-only database", ip_str));
+                return Err(ipv6_in_ipv4_error(&ip_str));
             }
 
             // Perform lookup and propagate errors
@@ -380,7 +381,7 @@ impl Reader {
                     // Convert maxminddb errors to appropriate messages
                     let error_msg = format!("{}", e);
                     if error_msg.contains("Invalid database") {
-                        Err(format!("The MaxMind DB file's data section contains bad data (unknown data type or corrupt data)"))
+                        Err(ERR_BAD_DATA.to_string())
                     } else if error_msg.contains("AddressNotFoundError") {
                         Ok(None)
                     } else {
@@ -412,15 +413,12 @@ impl Reader {
     ) -> PyResult<(PyObject, usize)> {
         // Quick check if database is closed
         if self.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err("Attempt to read from a closed MaxMind DB."));
+            return Err(PyValueError::new_err(ERR_CLOSED_DB));
         }
 
         // Parse IP address - support string or ipaddress objects
         let ip_str = parse_ip_address(ip_address)?;
-
-        // Clone the reader Arc for use without holding the lock
-        let reader_opt = self.reader.lock().unwrap().clone();
-        let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Attempt to read from a closed MaxMind DB."))?;
+        let reader = self.get_reader()?;
 
         // Release GIL during lookup
         type PrefixResult = Result<(Option<MaxMindValue>, usize), String>;
@@ -433,7 +431,7 @@ impl Reader {
             // Check for IPv6 address in IPv4-only database
             let metadata = reader.metadata();
             if metadata.ip_version == 4 && matches!(ip_addr, IpAddr::V6(_)) {
-                return Err(format!("Error looking up {}. You attempted to look up an IPv6 address in an IPv4-only database", ip_str));
+                return Err(ipv6_in_ipv4_error(&ip_str));
             }
 
             // Perform lookup with prefix length and propagate errors
@@ -443,12 +441,12 @@ impl Reader {
                     // Convert maxminddb errors to appropriate messages
                     let error_msg = format!("{}", e);
                     if error_msg.contains("Invalid database") {
-                        Err(format!("The MaxMind DB file's data section contains bad data (unknown data type or corrupt data)"))
+                        Err(ERR_BAD_DATA.to_string())
                     } else if error_msg.contains("AddressNotFoundError") {
                         // AddressNotFoundError still provides a prefix length
                         Ok((None, 0))
                     } else if error_msg.contains("IPv6 address in an IPv4-only database") {
-                        Err(format!("Error looking up {}. You attempted to look up an IPv6 address in an IPv4-only database", ip_str))
+                        Err(ipv6_in_ipv4_error(&ip_str))
                     } else {
                         Err(format!("Database error: {}", error_msg))
                     }
@@ -479,12 +477,10 @@ impl Reader {
     fn get_many(&self, py: Python, ips: Vec<String>) -> PyResult<Vec<PyObject>> {
         // Quick check if database is closed
         if self.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err("Attempt to read from a closed MaxMind DB."));
+            return Err(PyValueError::new_err(ERR_CLOSED_DB));
         }
 
-        // Clone the reader Arc for use without holding the lock
-        let reader_opt = self.reader.lock().unwrap().clone();
-        let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Attempt to read from a closed MaxMind DB."))?;
+        let reader = self.get_reader()?;
 
         // Release GIL during all lookups
         let results: Vec<PyResult<Option<MaxMindValue>>> = py.allow_threads(|| {
@@ -516,12 +512,10 @@ impl Reader {
     fn metadata(&self, _py: Python) -> PyResult<Metadata> {
         // Quick check if database is closed
         if self.closed.load(Ordering::Acquire) {
-            return Err(PyOSError::new_err("Attempt to read from a closed MaxMind DB."));
+            return Err(PyOSError::new_err(ERR_CLOSED_DB));
         }
 
-        // Clone the reader Arc for use
-        let reader_opt = self.reader.lock().unwrap().clone();
-        let reader = reader_opt.ok_or_else(|| PyOSError::new_err("Attempt to read from a closed MaxMind DB."))?;
+        let reader = self.get_reader().map_err(|_| PyOSError::new_err(ERR_CLOSED_DB))?;
 
         let meta = reader.metadata();
 
@@ -569,14 +563,23 @@ impl Reader {
     fn __iter__(slf: PyRef<'_, Self>) -> PyResult<ReaderIterator> {
         // Check if database is closed
         if slf.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err("Attempt to read from a closed MaxMind DB."));
+            return Err(PyValueError::new_err(ERR_CLOSED_DB));
         }
 
-        // Clone the reader Arc
-        let reader_opt = slf.reader.lock().unwrap().clone();
-        let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Attempt to read from a closed MaxMind DB."))?;
-
+        let reader = slf.get_reader()?;
         ReaderIterator::new(reader)
+    }
+}
+
+// Internal helper methods for Reader
+impl Reader {
+    /// Get the reader from the internal mutex, returning an error if closed
+    fn get_reader(&self) -> PyResult<Arc<ReaderSource>> {
+        self.reader
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| PyValueError::new_err(ERR_CLOSED_DB))
     }
 }
 
@@ -671,23 +674,35 @@ fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<String> {
     ))
 }
 
+/// Helper function to generate IPv6-in-IPv4 error message
+fn ipv6_in_ipv4_error(ip_str: &str) -> String {
+    format!("Error looking up {}. You attempted to look up an IPv6 address in an IPv4-only database", ip_str)
+}
+
+/// Helper function to open a file with appropriate error handling
+fn open_file(path: &str) -> PyResult<File> {
+    File::open(Path::new(path)).map_err(|e| {
+        match e.kind() {
+            std::io::ErrorKind::NotFound => PyFileNotFoundError::new_err(e.to_string()),
+            _ => PyIOError::new_err(e.to_string()),
+        }
+    })
+}
+
+/// Helper function to create a Reader from a ReaderSource
+fn create_reader(source: ReaderSource) -> Reader {
+    Reader {
+        reader: Arc::new(Mutex::new(Some(Arc::new(source)))),
+        closed: Arc::new(AtomicBool::new(false)),
+    }
+}
+
 /// Open a MaxMind DB using memory-mapped files (MODE_MMAP)
 fn open_database_mmap(path: &str) -> PyResult<Reader> {
     // Release GIL during file I/O operation
     let reader = Python::with_gil(|py| {
         py.allow_threads(|| {
-            // Open file and create memory map
-            let file = File::open(Path::new(path)).map_err(|e| {
-                // Distinguish between file I/O errors and database errors
-                match e.kind() {
-                    std::io::ErrorKind::NotFound => {
-                        PyFileNotFoundError::new_err(e.to_string())
-                    }
-                    _ => {
-                        PyIOError::new_err(e.to_string())
-                    }
-                }
-            })?;
+            let file = open_file(path)?;
 
             // Safety: The mmap is read-only and the file won't be modified
             let mmap = unsafe {
@@ -701,10 +716,7 @@ fn open_database_mmap(path: &str) -> PyResult<Reader> {
         })
     })?;
 
-    Ok(Reader {
-        reader: Arc::new(Mutex::new(Some(Arc::new(ReaderSource::Mmap(reader))))),
-        closed: Arc::new(AtomicBool::new(false)),
-    })
+    Ok(create_reader(ReaderSource::Mmap(reader)))
 }
 
 /// Open a MaxMind DB by loading entire file into memory (MODE_MEMORY)
@@ -712,18 +724,7 @@ fn open_database_memory(path: &str) -> PyResult<Reader> {
     // Release GIL during file I/O operation
     let reader = Python::with_gil(|py| {
         py.allow_threads(|| {
-            // Open file and read entire contents into memory
-            let mut file = File::open(Path::new(path)).map_err(|e| {
-                // Distinguish between file I/O errors and database errors
-                match e.kind() {
-                    std::io::ErrorKind::NotFound => {
-                        PyFileNotFoundError::new_err(e.to_string())
-                    }
-                    _ => {
-                        PyIOError::new_err(e.to_string())
-                    }
-                }
-            })?;
+            let mut file = open_file(path)?;
 
             let mut buffer = Vec::new();
             file.read_to_end(&mut buffer).map_err(|e| {
@@ -735,10 +736,7 @@ fn open_database_memory(path: &str) -> PyResult<Reader> {
         })
     })?;
 
-    Ok(Reader {
-        reader: Arc::new(Mutex::new(Some(Arc::new(ReaderSource::Memory(reader))))),
-        closed: Arc::new(AtomicBool::new(false)),
-    })
+    Ok(create_reader(ReaderSource::Memory(reader)))
 }
 
 /// Open the MaxMind database
