@@ -8,17 +8,17 @@ Benchmark results (250,000 lookups with random IPs):
 
 | Database              | Size  | Lookups/sec |
 |-----------------------|-------|-------------|
-| GeoLite2-Country      | 9.6MB | 347,214     |
-| GeoLite2-City         | 61MB  | 214,506     |
-| GeoIP2-City           | 117MB | 210,746     |
+| GeoLite2-Country      | 9.4MB | 492,768     |
+| GeoLite2-City         | 61MB  | 318,882     |
+| GeoIP2-City           | 117MB | 308,254     |
 
-**Average: 257,489 lookups/second**
+**Average: 373,301 lookups/second**
 
 ### Optimizations Implemented
 
 - **Memory-mapped files**: Uses `mmap` for efficient file I/O instead of loading entire database into memory
 - **GIL management**: Releases Python GIL during IP parsing and database lookups for better concurrency
-- **Link-time optimization**: Aggressive compiler optimizations (LTO, single codegen unit)
+- **Link-time optimization**: Aggressive compiler optimizations (thin LTO, single codegen unit)
 - **Zero-copy operations**: Minimal data copying between Rust and Python
 - **Batch lookups**: `get_many()` method for processing multiple IPs efficiently
 
@@ -141,6 +141,32 @@ reader = maxminddb.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxmind
 # MODE_MEMORY: Load entire database into memory (useful for embedded systems or when file handle limits are a concern)
 reader = maxminddb.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb.MODE_MEMORY)
 ```
+
+## Examples
+
+The `examples/` directory contains complete working examples demonstrating various use cases:
+
+- **[basic_usage.py](examples/basic_usage.py)** - Simple IP lookups, metadata access, and database lifecycle
+- **[context_manager.py](examples/context_manager.py)** - Using `with` statement for automatic resource cleanup
+- **[iterator_demo.py](examples/iterator_demo.py)** - Iterating over all networks in the database
+- **[batch_processing.py](examples/batch_processing.py)** - High-performance batch lookups with `get_many()`
+
+Run any example:
+```bash
+.venv/bin/python examples/basic_usage.py
+.venv/bin/python examples/batch_processing.py
+```
+
+## Documentation
+
+- **API Documentation**: All classes and methods include comprehensive docstrings. Use Python's built-in `help()`:
+  ```python
+  import maxminddb
+  help(maxminddb.open_database)
+  help(maxminddb.Reader.get)
+  ```
+- **Type Hints**: Full type stub file (`maxminddb.pyi`) included for IDE autocomplete and type checking
+- **Changelog**: See [CHANGELOG.md](CHANGELOG.md) for version history and release notes
 
 ## Benchmarking
 

@@ -281,26 +281,34 @@ impl ReaderSource {
 /// Metadata about the MaxMind DB database
 #[pyclass(module = "maxminddb.extension")]
 struct Metadata {
+    /// The major version number of the binary format used when creating the database.
     #[pyo3(get)]
     binary_format_major_version: u16,
+    /// The minor version number of the binary format used when creating the database.
     #[pyo3(get)]
     binary_format_minor_version: u16,
+    /// The Unix epoch timestamp for when the database was built.
     #[pyo3(get)]
     build_epoch: u64,
+    /// A string identifying the database type (e.g., 'GeoIP2-City', 'GeoLite2-Country').
     #[pyo3(get)]
     database_type: String,
     description_dict: BTreeMap<String, String>,
+    /// The IP version of the data in a database. A value of 4 means IPv4 only; 6 supports both IPv4 and IPv6.
     #[pyo3(get)]
     ip_version: u16,
     languages_list: Vec<String>,
+    /// The number of nodes in the search tree.
     #[pyo3(get)]
     node_count: u32,
+    /// The record size in bits (24, 28, or 32).
     #[pyo3(get)]
     record_size: u16,
 }
 
 #[pymethods]
 impl Metadata {
+    /// A dictionary from locale codes to the database description in that locale.
     #[getter]
     fn description(&self, py: Python) -> PyResult<Py<PyAny>> {
         // Convert BTreeMap<String, String> to Python dict
@@ -311,6 +319,7 @@ impl Metadata {
         Ok(dict.into())
     }
 
+    /// A list of locale codes supported by the database for descriptions and other text.
     #[getter]
     fn languages(&self, py: Python) -> PyResult<Py<PyAny>> {
         // Convert Vec<String> to Python list
@@ -318,11 +327,13 @@ impl Metadata {
         Ok(list.into_any().unbind())
     }
 
+    /// The size of a node in bytes.
     #[getter]
     fn node_byte_size(&self) -> u16 {
         self.record_size / 4
     }
 
+    /// The size of the search tree in bytes.
     #[getter]
     fn search_tree_size(&self) -> u32 {
         self.node_count * (self.record_size as u32 / 4)
@@ -381,11 +392,41 @@ impl Reader {
         }
     }
 
+    /// Check if the database has been closed.
+    ///
+    /// Returns:
+    ///     True if the database has been closed, False otherwise.
+    ///
+    /// Example:
+    ///     >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb')
+    ///     >>> reader.closed
+    ///     False
+    ///     >>> reader.close()
+    ///     >>> reader.closed
+    ///     True
     #[getter]
     fn closed(&self) -> bool {
         self.closed.load(Ordering::Relaxed)
     }
 
+    /// Query the database for information about an IP address.
+    ///
+    /// Args:
+    ///     ip_address: The IP address to look up. May be a string (e.g., '1.2.3.4')
+    ///         or an ipaddress.IPv4Address or ipaddress.IPv6Address object.
+    ///
+    /// Returns:
+    ///     A dictionary containing the database record for the IP address, or None
+    ///     if the address is not in the database.
+    ///
+    /// Raises:
+    ///     ValueError: If the database has been closed or the IP address is invalid.
+    ///     InvalidDatabaseError: If the database data is corrupt or invalid.
+    ///
+    /// Example:
+    ///     >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb')
+    ///     >>> reader.get('8.8.8.8')
+    ///     {'city': {'names': {'en': 'Mountain View'}}, ...}
     #[inline]
     fn get(&self, py: Python, ip_address: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         // Quick check if database is closed
@@ -415,6 +456,26 @@ impl Reader {
         }
     }
 
+    /// Query the database for information about an IP address and return the network prefix length.
+    ///
+    /// Args:
+    ///     ip_address: The IP address to look up. May be a string (e.g., '1.2.3.4')
+    ///         or an ipaddress.IPv4Address or ipaddress.IPv6Address object.
+    ///
+    /// Returns:
+    ///     A tuple of (record, prefix_length) where record is a dictionary containing
+    ///     the database record (or None if not found), and prefix_length is an integer
+    ///     representing the network prefix length associated with the record.
+    ///
+    /// Raises:
+    ///     ValueError: If the database has been closed or the IP address is invalid.
+    ///     InvalidDatabaseError: If the database data is corrupt or invalid.
+    ///
+    /// Example:
+    ///     >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb')
+    ///     >>> record, prefix_len = reader.get_with_prefix_len('8.8.8.8')
+    ///     >>> prefix_len
+    ///     24
     fn get_with_prefix_len(
         &self,
         py: Python,
@@ -450,8 +511,30 @@ impl Reader {
         }
     }
 
-    /// Batch lookup multiple IP addresses at once to reduce call overhead
-    /// This is an extension method not in the original maxminddb module
+    /// Query the database for multiple IP addresses in a single batch operation.
+    ///
+    /// This is an extension method not available in the original maxminddb module.
+    /// It provides better performance than calling get() repeatedly by reducing
+    /// call overhead and releasing the GIL during the entire batch operation.
+    ///
+    /// Args:
+    ///     ips: A list of IP address strings to look up (e.g., ['1.2.3.4', '8.8.8.8']).
+    ///
+    /// Returns:
+    ///     A list of dictionaries containing database records for each IP address.
+    ///     Elements will be None for IP addresses not found in the database.
+    ///     The order of results matches the order of input IPs.
+    ///
+    /// Raises:
+    ///     ValueError: If the database has been closed or any IP address is invalid.
+    ///     InvalidDatabaseError: If the database data is corrupt or invalid.
+    ///
+    /// Example:
+    ///     >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb')
+    ///     >>> ips = ['8.8.8.8', '1.1.1.1', '208.67.222.222']
+    ///     >>> results = reader.get_many(ips)
+    ///     >>> len(results)
+    ///     3
     fn get_many(&self, py: Python, ips: Vec<String>) -> PyResult<Vec<Py<PyAny>>> {
         // Quick check if database is closed
         if self.closed.load(Ordering::Acquire) {
@@ -494,7 +577,30 @@ impl Reader {
         Ok(objects)
     }
 
-    /// Metadata about the database
+    /// Get metadata about the MaxMind DB database.
+    ///
+    /// Returns:
+    ///     A Metadata object containing information about the database including:
+    ///     - database_type: The type of database (e.g., 'GeoIP2-City')
+    ///     - binary_format_major_version: Major version of the binary format
+    ///     - binary_format_minor_version: Minor version of the binary format
+    ///     - build_epoch: Unix timestamp when the database was built
+    ///     - ip_version: 4 for IPv4-only, 6 for databases supporting both IPv4 and IPv6
+    ///     - node_count: Number of nodes in the search tree
+    ///     - record_size: Record size in bits (24, 28, or 32)
+    ///     - description: Dictionary of locale codes to database descriptions
+    ///     - languages: List of supported locale codes
+    ///
+    /// Raises:
+    ///     OSError: If the database has been closed.
+    ///
+    /// Example:
+    ///     >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb')
+    ///     >>> metadata = reader.metadata()
+    ///     >>> metadata.database_type
+    ///     'GeoIP2-City'
+    ///     >>> metadata.ip_version
+    ///     6
     fn metadata(&self, _py: Python) -> PyResult<Metadata> {
         // Quick check if database is closed
         if self.closed.load(Ordering::Acquire) {
@@ -520,7 +626,16 @@ impl Reader {
         })
     }
 
-    /// Close the database and release resources
+    /// Close the database and release resources.
+    ///
+    /// Closes the MaxMind DB file handle and releases associated resources.
+    /// After calling this method, attempting to call get() or other query
+    /// methods will raise a ValueError.
+    ///
+    /// Example:
+    ///     >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb')
+    ///     >>> reader.close()
+    ///     >>> reader.get('8.8.8.8')  # Raises ValueError
     fn close(&self) {
         // Set closed flag and clear the reader
         self.closed.store(true, Ordering::Release);
@@ -529,7 +644,17 @@ impl Reader {
         }
     }
 
-    /// Context manager entry
+    /// Enter the context manager (for use with 'with' statement).
+    ///
+    /// Returns:
+    ///     The Reader object itself.
+    ///
+    /// Raises:
+    ///     ValueError: If attempting to reopen a closed database.
+    ///
+    /// Example:
+    ///     >>> with maxminddb.open_database('/path/to/GeoIP2-City.mmdb') as reader:
+    ///     ...     result = reader.get('8.8.8.8')
     fn __enter__(slf: Py<Self>, py: Python) -> PyResult<Py<Self>> {
         // Check if database is closed
         let is_closed = slf.borrow(py).closed.load(Ordering::Acquire);
@@ -541,7 +666,9 @@ impl Reader {
         Ok(slf)
     }
 
-    /// Context manager exit
+    /// Exit the context manager (for use with 'with' statement).
+    ///
+    /// Automatically closes the database when exiting the 'with' block.
     fn __exit__(
         &self,
         _exc_type: &Bound<'_, PyAny>,
@@ -551,7 +678,24 @@ impl Reader {
         self.close();
     }
 
-    /// Iterate over all networks in the database
+    /// Iterate over all networks in the database.
+    ///
+    /// Returns an iterator that yields (network, data) tuples for all networks
+    /// in the database. Networks are represented as ipaddress.IPv4Network or
+    /// ipaddress.IPv6Network objects.
+    ///
+    /// Returns:
+    ///     An iterator yielding tuples of (network, record) for each entry.
+    ///
+    /// Raises:
+    ///     ValueError: If the database has been closed.
+    ///
+    /// Example:
+    ///     >>> reader = maxminddb.open_database('/path/to/GeoLite2-Country.mmdb')
+    ///     >>> for network, data in reader:
+    ///     ...     print(f"{network}: {data['country']['iso_code']}")
+    ///     ...     break
+    ///     1.0.0.0/24: AU
     fn __iter__(slf: PyRef<'_, Self>) -> PyResult<ReaderIterator> {
         // Check if database is closed
         if slf.closed.load(Ordering::Acquire) {
@@ -790,7 +934,42 @@ fn open_database_memory(path: &str) -> PyResult<Reader> {
     Ok(create_reader(ReaderSource::Memory(reader)))
 }
 
-/// Open the MaxMind database
+/// Open a MaxMind DB database file.
+///
+/// Args:
+///     database: Path to the MaxMind DB file. Can be a string or PathLike object.
+///     mode: The mode to use when opening the database. Defaults to MODE_AUTO.
+///         Available modes:
+///         - MODE_AUTO (0): Automatically choose the best mode (uses MODE_MMAP)
+///         - MODE_MMAP (2): Use memory-mapped file I/O (default, best performance)
+///         - MODE_MMAP_EXT (1): Same as MODE_MMAP
+///         - MODE_MEMORY (8): Load entire database into memory
+///         - MODE_FILE (4): Not yet supported
+///         - MODE_FD (16): Not yet supported
+///
+/// Returns:
+///     A Reader object that can be used to query the database.
+///
+/// Raises:
+///     FileNotFoundError: If the database file does not exist.
+///     IOError: If the database file cannot be read or memory-mapped.
+///     InvalidDatabaseError: If the file is not a valid MaxMind DB file.
+///     ValueError: If an unsupported mode is specified.
+///
+/// Example:
+///     >>> import maxminddb
+///     >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb')
+///     >>> reader.get('8.8.8.8')
+///     {'city': {'names': {'en': 'Mountain View'}}, ...}
+///     >>> reader.close()
+///
+///     >>> # Using context manager
+///     >>> with maxminddb.open_database('/path/to/GeoIP2-City.mmdb') as reader:
+///     ...     result = reader.get('8.8.8.8')
+///
+///     >>> # Specify mode explicitly
+///     >>> reader = maxminddb.open_database('/path/to/GeoIP2-City.mmdb',
+///     ...                                   mode=maxminddb.MODE_MEMORY)
 #[pyfunction]
 #[pyo3(signature = (database, mode=MODE_AUTO))]
 fn open_database(database: &Bound<'_, PyAny>, mode: i32) -> PyResult<Reader> {

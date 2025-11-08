@@ -42,6 +42,7 @@ test = ["pytest>=8.3.5"]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
+include = ["maxminddb.pyi", "py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
