@@ -2,7 +2,7 @@ use ::maxminddb as maxminddb_crate;
 use maxminddb_crate::Reader as MaxMindReader;
 use memmap2::Mmap;
 use pyo3::{
-    exceptions::{PyFileNotFoundError, PyIOError, PyRuntimeError, PyValueError},
+    exceptions::{PyFileNotFoundError, PyIOError, PyOSError, PyRuntimeError, PyValueError},
     prelude::*,
     types::{PyDict, PyModule},
 };
@@ -349,7 +349,7 @@ impl Reader {
     fn get(&self, py: Python, ip_address: &Bound<'_, PyAny>) -> PyResult<PyObject> {
         // Quick check if database is closed
         if self.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err("Attempt to read from a closed MaxMind DB"));
+            return Err(PyValueError::new_err("Attempt to read from a closed MaxMind DB."));
         }
 
         // Parse IP address - support string or ipaddress objects
@@ -357,7 +357,7 @@ impl Reader {
 
         // Clone the reader Arc for use without holding the lock
         let reader_opt = self.reader.lock().unwrap().clone();
-        let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Database is closed"))?;
+        let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Attempt to read from a closed MaxMind DB."))?;
 
         // Release GIL during both parsing and lookup for better concurrency
         let result: Result<Option<MaxMindValue>, String> = py.allow_threads(|| {
@@ -385,7 +385,7 @@ impl Reader {
     ) -> PyResult<(PyObject, usize)> {
         // Quick check if database is closed
         if self.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err("Attempt to read from a closed MaxMind DB"));
+            return Err(PyValueError::new_err("Attempt to read from a closed MaxMind DB."));
         }
 
         // Parse IP address - support string or ipaddress objects
@@ -393,7 +393,7 @@ impl Reader {
 
         // Clone the reader Arc for use without holding the lock
         let reader_opt = self.reader.lock().unwrap().clone();
-        let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Database is closed"))?;
+        let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Attempt to read from a closed MaxMind DB."))?;
 
         // Release GIL during lookup
         let result: Result<(Option<MaxMindValue>, usize), String> = py.allow_threads(|| {
@@ -426,12 +426,12 @@ impl Reader {
     fn get_many(&self, py: Python, ips: Vec<String>) -> PyResult<Vec<PyObject>> {
         // Quick check if database is closed
         if self.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err("Attempt to read from a closed MaxMind DB"));
+            return Err(PyValueError::new_err("Attempt to read from a closed MaxMind DB."));
         }
 
         // Clone the reader Arc for use without holding the lock
         let reader_opt = self.reader.lock().unwrap().clone();
-        let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Database is closed"))?;
+        let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Attempt to read from a closed MaxMind DB."))?;
 
         // Release GIL during all lookups
         let results: Vec<PyResult<Option<MaxMindValue>>> = py.allow_threads(|| {
@@ -463,12 +463,12 @@ impl Reader {
     fn metadata(&self, _py: Python) -> PyResult<Metadata> {
         // Quick check if database is closed
         if self.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err("Attempt to read from a closed MaxMind DB"));
+            return Err(PyOSError::new_err("Attempt to read from a closed MaxMind DB."));
         }
 
         // Clone the reader Arc for use
         let reader_opt = self.reader.lock().unwrap().clone();
-        let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Database is closed"))?;
+        let reader = reader_opt.ok_or_else(|| PyOSError::new_err("Attempt to read from a closed MaxMind DB."))?;
 
         let meta = reader.metadata();
 
@@ -516,12 +516,12 @@ impl Reader {
     fn __iter__(slf: PyRef<'_, Self>) -> PyResult<ReaderIterator> {
         // Check if database is closed
         if slf.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err("Attempt to read from a closed MaxMind DB"));
+            return Err(PyValueError::new_err("Attempt to read from a closed MaxMind DB."));
         }
 
         // Clone the reader Arc
         let reader_opt = slf.reader.lock().unwrap().clone();
-        let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Database is closed"))?;
+        let reader = reader_opt.ok_or_else(|| PyValueError::new_err("Attempt to read from a closed MaxMind DB."))?;
 
         ReaderIterator::new(reader)
     }
