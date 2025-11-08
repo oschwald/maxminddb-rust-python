@@ -277,6 +277,22 @@ prettier --check "**/*.md" "**/*.yml"
 prettier --write "**/*.md" "**/*.yml"
 ```
 
+### Git Pre-commit Hook
+
+The repository includes a pre-commit hook that automatically runs precious lint on staged files before each commit. To enable it:
+
+```bash
+# Configure git to use the .githooks directory
+git config core.hooksPath .githooks
+```
+
+If linting fails during a commit, fix the issues with:
+
+```bash
+# Automatically fix formatting on staged files
+precious tidy --staged
+```
+
 ### Continuous Integration
 
 GitHub Actions workflows automatically run:
