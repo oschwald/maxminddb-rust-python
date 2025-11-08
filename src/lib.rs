@@ -589,24 +589,26 @@ struct ReaderIterator {
 
 impl ReaderIterator {
     fn new(reader: Arc<ReaderSource>) -> PyResult<Self> {
-        // Collect all items from both IPv4 and IPv6 networks
         let mut items = Vec::new();
+        let ip_version = reader.metadata().ip_version;
 
-        // IPv4: 0.0.0.0/0
-        let ipv4_net = ipnetwork::IpNetwork::from_str("0.0.0.0/0")
-            .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to create IPv4 network: {e}")))?;
+        // For IPv4 databases, iterate over IPv4 range only
+        // For IPv6 databases, iterate over IPv6 range only (includes IPv4-mapped addresses)
+        if ip_version == 4 {
+            let ipv4_net = ipnetwork::IpNetwork::from_str("0.0.0.0/0")
+                .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to create IPv4 network: {e}")))?;
 
-        let mut ipv4_items = reader.collect_within(ipv4_net)
-            .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to iterate IPv4: {e}")))?;
-        items.append(&mut ipv4_items);
+            let mut ipv4_items = reader.collect_within(ipv4_net)
+                .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to iterate IPv4: {e}")))?;
+            items.append(&mut ipv4_items);
+        } else {
+            let ipv6_net = ipnetwork::IpNetwork::from_str("::/0")
+                .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to create IPv6 network: {e}")))?;
 
-        // IPv6: ::/0
-        let ipv6_net = ipnetwork::IpNetwork::from_str("::/0")
-            .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to create IPv6 network: {e}")))?;
-
-        let mut ipv6_items = reader.collect_within(ipv6_net)
-            .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to iterate IPv6: {e}")))?;
-        items.append(&mut ipv6_items);
+            let mut ipv6_items = reader.collect_within(ipv6_net)
+                .map_err(|e| InvalidDatabaseError::new_err(format!("Failed to iterate IPv6: {e}")))?;
+            items.append(&mut ipv6_items);
+        }
 
         Ok(Self {
             items,
@@ -695,7 +697,7 @@ fn open_database_mmap(path: &str) -> PyResult<Reader> {
             };
 
             MaxMindReader::from_source(mmap)
-                .map_err(|e| InvalidDatabaseError::new_err(format!("The MaxMind DB file is invalid or corrupted: {e}")))
+                .map_err(|_| InvalidDatabaseError::new_err(format!("Error opening database file ({}). Is this a valid MaxMind DB file?", path)))
         })
     })?;
 
@@ -729,7 +731,7 @@ fn open_database_memory(path: &str) -> PyResult<Reader> {
             })?;
 
             MaxMindReader::from_source(buffer)
-                .map_err(|e| InvalidDatabaseError::new_err(format!("The MaxMind DB file is invalid or corrupted: {e}")))
+                .map_err(|_| InvalidDatabaseError::new_err(format!("Error opening database file ({}). Is this a valid MaxMind DB file?", path)))
         })
     })?;
 
