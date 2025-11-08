@@ -1,16 +1,15 @@
 use maxminddb::Reader as MaxMindReader;
-use pyo3::{
-    exceptions::PyValueError,
-    prelude::*,
-    types::{PyDict, PyList},
-};
-use serde_json::Value;
+use memmap2::Mmap;
+use pyo3::{exceptions::PyValueError, prelude::*, types::PyModule};
+use std::fs::File;
+use std::net::IpAddr;
 use std::path::Path;
 
 /// A Python wrapper around the MaxMind DB reader.
+/// Uses memory-mapped files for improved performance.
 #[pyclass]
 struct Reader {
-    reader: MaxMindReader<Vec<u8>>,
+    reader: MaxMindReader<Mmap>,
 }
 
 #[pymethods]
@@ -20,58 +19,95 @@ impl Reader {
         open_database(path)
     }
 
+    #[inline]
     fn get(&self, py: Python, ip: &str) -> PyResult<PyObject> {
-        let ip_addr = ip
-            .parse()
-            .map_err(|_| PyValueError::new_err("Invalid IP address"))?;
+        // Release GIL during both parsing and lookup for better concurrency
+        let result: Option<serde_json::Value> = py.allow_threads(|| {
+            // Parse IP address - using ? here to short-circuit on error
+            let ip_addr: IpAddr = ip.parse().ok()?;
 
-        match self.reader.lookup::<Value>(ip_addr) {
-            Ok(Some(data)) => Ok(self.convert_to_py(py, &data)),
-            Ok(None) => Ok(py.None()),
-            Err(_) => Err(PyValueError::new_err("Lookup error")),
+            // Perform lookup - using ok() to convert Result to Option
+            self.reader.lookup(ip_addr).ok().flatten()
+        });
+
+        // Convert result to Python object
+        match result {
+            Some(data) => {
+                // Use pythonize for direct serde to Python conversion
+                pythonize::pythonize(py, &data)
+                    .map(|obj| obj.unbind())
+                    .map_err(|e| PyValueError::new_err(format!("Conversion error: {e}")))
+            }
+            None => Ok(py.None()),
         }
+    }
+
+    /// Batch lookup multiple IP addresses at once to reduce call overhead
+    fn get_many(&self, py: Python, ips: Vec<String>) -> PyResult<Vec<PyObject>> {
+        // Release GIL during all lookups
+        let results: Vec<PyResult<Option<serde_json::Value>>> = py.allow_threads(|| {
+            ips.iter()
+                .map(|ip| {
+                    let ip_addr: IpAddr = ip.parse().map_err(|_| {
+                        PyValueError::new_err(format!("Invalid IP address: {ip}"))
+                    })?;
+
+                    self.reader
+                        .lookup(ip_addr)
+                        .map_err(|e| PyValueError::new_err(format!("Lookup error: {e}")))
+                })
+                .collect()
+        });
+
+        // Convert results to Python objects
+        results
+            .into_iter()
+            .map(|result| match result? {
+                Some(data) => pythonize::pythonize(py, &data)
+                    .map(|obj| obj.unbind())
+                    .map_err(|e| PyValueError::new_err(format!("Conversion error: {e}"))),
+                None => Ok(py.None()),
+            })
+            .collect()
+    }
+
+    /// Metadata about the database
+    fn metadata(&self, py: Python) -> PyResult<PyObject> {
+        let metadata = &self.reader.metadata;
+        pythonize::pythonize(py, metadata)
+            .map(|obj| obj.unbind())
+            .map_err(|e| PyValueError::new_err(format!("Metadata conversion error: {e}")))
     }
 }
 
-impl Reader {
-    /// Recursively convert `serde_json::Value` into Python objects
-    fn convert_to_py(&self, py: Python, value: &Value) -> PyObject {
-        match value {
-            Value::Null => py.None(),
-            Value::Bool(b) => b.into_py(py),
-            Value::Number(n) => {
-                if let Some(i) = n.as_i64() {
-                    i.into_py(py)
-                } else if let Some(f) = n.as_f64() {
-                    f.into_py(py)
-                } else {
-                    py.None()
-                }
-            }
-            Value::String(s) => s.into_py(py),
-            Value::Array(arr) => {
-                let py_list = PyList::empty(py);
-                for item in arr {
-                    py_list.append(self.convert_to_py(py, item)).unwrap();
-                }
-                py_list.into()
-            }
-            Value::Object(obj) => {
-                let py_dict = PyDict::new(py);
-                for (key, val) in obj {
-                    py_dict.set_item(key, self.convert_to_py(py, val)).unwrap();
-                }
-                py_dict.into()
-            }
-        }
-    }
-}
-
-/// Open the MaxMind database and return a Reader instance
+/// Open the MaxMind database using memory-mapped files for better performance
 #[pyfunction]
 fn open_database(path: &str) -> PyResult<Reader> {
-    let reader = MaxMindReader::open_readfile(Path::new(path)).map_err(|e| {
-        PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Failed to open database: {}", e))
+    // Release GIL during file I/O operation
+    let reader = Python::with_gil(|py| {
+        py.allow_threads(|| {
+            // Open file and create memory map
+            let file = File::open(Path::new(path)).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                    "Failed to open database file: {e}"
+                ))
+            })?;
+
+            // Safety: The mmap is read-only and the file won't be modified
+            let mmap = unsafe {
+                Mmap::map(&file).map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                        "Failed to memory-map database: {e}"
+                    ))
+                })?
+            };
+
+            MaxMindReader::from_source(mmap).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                    "Failed to open database: {e}"
+                ))
+            })
+        })
     })?;
     Ok(Reader { reader })
 }
