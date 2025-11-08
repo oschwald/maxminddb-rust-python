@@ -204,6 +204,7 @@ enum ReaderSource {
 }
 
 impl ReaderSource {
+    #[inline]
     fn lookup(&self, ip: IpAddr) -> Result<Option<MaxMindValue>, maxminddb_crate::MaxMindDbError> {
         match self {
             ReaderSource::Mmap(reader) => reader.lookup(ip),
@@ -211,6 +212,7 @@ impl ReaderSource {
         }
     }
 
+    #[inline]
     fn lookup_prefix(&self, ip: IpAddr) -> Result<(Option<MaxMindValue>, usize), maxminddb_crate::MaxMindDbError> {
         match self {
             ReaderSource::Mmap(reader) => reader.lookup_prefix(ip),
@@ -218,6 +220,7 @@ impl ReaderSource {
         }
     }
 
+    #[inline]
     fn metadata(&self) -> &maxminddb_crate::Metadata {
         match self {
             ReaderSource::Mmap(reader) => &reader.metadata,
@@ -283,6 +286,7 @@ impl Metadata {
 struct Reader {
     reader: Arc<RwLock<Option<Arc<ReaderSource>>>>,
     closed: Arc<AtomicBool>,
+    ip_version: u16,
 }
 
 #[pymethods]
@@ -342,12 +346,12 @@ impl Reader {
 
         // Parse IP address - support string or ipaddress objects
         let parsed_ip = parse_ip_address(ip_address)?;
-        let reader = self.get_reader()?;
-        let metadata = reader.metadata();
 
-        if metadata.ip_version == 4 && matches!(parsed_ip.addr, IpAddr::V6(_)) {
-            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip.repr)));
+        if self.ip_version == 4 && matches!(parsed_ip.addr, IpAddr::V6(_)) {
+            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip.addr)));
         }
+
+        let reader = self.get_reader()?;
 
         // Release GIL during lookup for better concurrency
         let lookup_result = py.detach(|| reader.lookup(parsed_ip.addr));
@@ -374,12 +378,12 @@ impl Reader {
 
         // Parse IP address - support string or ipaddress objects
         let parsed_ip = parse_ip_address(ip_address)?;
-        let reader = self.get_reader()?;
-        let metadata = reader.metadata();
 
-        if metadata.ip_version == 4 && matches!(parsed_ip.addr, IpAddr::V6(_)) {
-            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip.repr)));
+        if self.ip_version == 4 && matches!(parsed_ip.addr, IpAddr::V6(_)) {
+            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip.addr)));
         }
+
+        let reader = self.get_reader()?;
 
         // Release GIL during lookup
         let result = py.detach(|| reader.lookup_prefix(parsed_ip.addr));
@@ -405,21 +409,20 @@ impl Reader {
             return Err(PyValueError::new_err(ERR_CLOSED_DB));
         }
 
-        let reader = self.get_reader()?;
-        let metadata = reader.metadata();
-
         let mut parsed_ips = Vec::with_capacity(ips.len());
         for ip in &ips {
             let ip_addr: IpAddr = ip
                 .parse()
                 .map_err(|_| PyValueError::new_err(format!("Invalid IP address: {ip}")))?;
 
-            if metadata.ip_version == 4 && matches!(ip_addr, IpAddr::V6(_)) {
-                return Err(PyValueError::new_err(ipv6_in_ipv4_error(ip)));
+            if self.ip_version == 4 && matches!(ip_addr, IpAddr::V6(_)) {
+                return Err(PyValueError::new_err(ipv6_in_ipv4_error(&ip_addr)));
             }
 
             parsed_ips.push(ip_addr);
         }
+
+        let reader = self.get_reader()?;
 
         // Release GIL during all lookups
         let results: Vec<Result<Option<MaxMindValue>, MaxMindDbError>> =
@@ -510,6 +513,7 @@ impl Reader {
 // Internal helper methods for Reader
 impl Reader {
     /// Get the reader from the internal mutex, returning an error if closed
+    #[inline]
     fn get_reader(&self) -> PyResult<Arc<ReaderSource>> {
         self.reader
             .read()
@@ -620,26 +624,26 @@ impl ReaderWithin {
 }
 
 struct ParsedIp {
-    repr: String,
     addr: IpAddr,
 }
 
 /// Helper function to parse IP address from string or ipaddress objects
+#[inline(always)]
 fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<ParsedIp> {
+    // Fast path: Try string first (most common case)
     if let Ok(py_str) = ip_address.cast::<PyString>() {
-        let repr = py_str.to_str()?.to_owned();
-        let addr = repr.parse().map_err(|_| {
-            PyValueError::new_err(format!("'{}' does not appear to be an IPv4 or IPv6 address", repr))
+        let s = py_str.to_str()?;
+        let addr = s.parse().map_err(|_| {
+            PyValueError::new_err(format!("'{}' does not appear to be an IPv4 or IPv6 address", s))
         })?;
-        return Ok(ParsedIp { repr, addr });
+        return Ok(ParsedIp { addr });
     }
 
-    // Check if it's an ipaddress.IPv4Address or IPv6Address
+    // Slow path: Check if it's an ipaddress.IPv4Address or IPv6Address
     let type_name = ip_address.get_type().name()?;
     if type_name == "IPv4Address" || type_name == "IPv6Address" {
         let addr = ip_address.extract::<IpAddr>()?;
-        let repr = ip_address.str()?.to_string();
-        return Ok(ParsedIp { repr, addr });
+        return Ok(ParsedIp { addr });
     }
 
     Err(PyTypeError::new_err(
@@ -648,8 +652,9 @@ fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<ParsedIp> {
 }
 
 /// Helper function to generate IPv6-in-IPv4 error message
-fn ipv6_in_ipv4_error(ip_str: &str) -> String {
-    format!("Error looking up {}. You attempted to look up an IPv6 address in an IPv4-only database", ip_str)
+#[inline]
+fn ipv6_in_ipv4_error(ip: &IpAddr) -> String {
+    format!("Error looking up {}. You attempted to look up an IPv6 address in an IPv4-only database", ip)
 }
 
 /// Helper function to open a file with appropriate error handling
@@ -664,9 +669,11 @@ fn open_file(path: &str) -> PyResult<File> {
 
 /// Helper function to create a Reader from a ReaderSource
 fn create_reader(source: ReaderSource) -> Reader {
+    let ip_version = source.metadata().ip_version;
     Reader {
         reader: Arc::new(RwLock::new(Some(Arc::new(source)))),
         closed: Arc::new(AtomicBool::new(false)),
+        ip_version,
     }
 }
 
