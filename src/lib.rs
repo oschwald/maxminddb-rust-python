@@ -4,7 +4,8 @@ use memmap2::Mmap;
 use pyo3::{
     exceptions::{PyFileNotFoundError, PyIOError, PyOSError, PyRuntimeError, PyValueError},
     prelude::*,
-    types::{PyDict, PyModule},
+    types::{PyBytes, PyDict, PyList, PyModule},
+    conversion::IntoPyObjectExt,
 };
 use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use std::{
@@ -44,34 +45,33 @@ impl MaxMindValue {
     fn to_python(&self, py: Python) -> PyResult<PyObject> {
         match self {
             MaxMindValue::Array(arr) => {
-                let list: Result<Vec<_>, _> = arr.iter()
+                let elements: Vec<_> = arr.iter()
                     .map(|v| v.to_python(py))
-                    .collect();
-                Ok(list?.to_object(py))
+                    .collect::<PyResult<_>>()?;
+                Ok(PyList::new(py, elements)?.into())
             }
-            MaxMindValue::Boolean(b) => Ok(b.to_object(py)),
+            MaxMindValue::Boolean(b) => Ok(b.into_py_any(py)?),
             MaxMindValue::Bytes(b) => {
-                // Create Python bytearray
-                let bytearray_class = py.import_bound("builtins")?.getattr("bytearray")?;
-                Ok(bytearray_class.call1((b.as_slice(),))?.unbind())
+                // Return immutable bytes for better compatibility and performance
+                Ok(PyBytes::new(py, b).into())
             }
-            MaxMindValue::Double(d) => Ok(d.to_object(py)),
-            MaxMindValue::Float(f) => Ok(f.to_object(py)),
-            MaxMindValue::Int32(i) => Ok(i.to_object(py)),
+            MaxMindValue::Double(d) => Ok(d.into_py_any(py)?),
+            MaxMindValue::Float(f) => Ok(f.into_py_any(py)?),
+            MaxMindValue::Int32(i) => Ok(i.into_py_any(py)?),
             MaxMindValue::Map(m) => {
-                let dict = PyDict::new_bound(py);
+                let dict = PyDict::new(py);
                 for (k, v) in m {
                     dict.set_item(k, v.to_python(py)?)?;
                 }
-                Ok(dict.unbind().into())
+                Ok(dict.into())
             }
-            MaxMindValue::String(s) => Ok(s.to_object(py)),
-            MaxMindValue::Uint16(u) => Ok(u.to_object(py)),
-            MaxMindValue::Uint32(u) => Ok(u.to_object(py)),
-            MaxMindValue::Uint64(u) => Ok(u.to_object(py)),
+            MaxMindValue::String(s) => Ok(s.as_str().into_py_any(py)?),
+            MaxMindValue::Uint16(u) => Ok(u.into_py_any(py)?),
+            MaxMindValue::Uint32(u) => Ok(u.into_py_any(py)?),
+            MaxMindValue::Uint64(u) => Ok(u.into_py_any(py)?),
             MaxMindValue::Uint128(u) => {
                 // Python int can handle arbitrary precision integers
-                Ok(u.to_object(py))
+                Ok(u.into_py_any(py)?)
             }
         }
     }
@@ -253,17 +253,17 @@ impl Metadata {
     #[getter]
     fn description(&self, py: Python) -> PyResult<PyObject> {
         // Convert BTreeMap<String, String> to Python dict
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         for (k, v) in &self.description_dict {
             dict.set_item(k, v)?;
         }
-        Ok(dict.unbind().into())
+        Ok(dict.into())
     }
 
     #[getter]
     fn languages(&self, py: Python) -> PyResult<PyObject> {
         // Convert Vec<String> to Python list
-        Ok(self.languages_list.to_object(py))
+        self.languages_list.clone().into_py_any(py)
     }
 
     #[getter]
@@ -598,7 +598,7 @@ impl ReaderIterator {
                 format!("Failed to iterate {}: {}", network_type, e)
             ))?;
 
-        let ipaddress = py.import_bound("ipaddress")?;
+        let ipaddress = py.import("ipaddress")?;
         let ipv4_network_cls = ipaddress.getattr("IPv4Network")?.unbind();
         let ipv6_network_cls = ipaddress.getattr("IPv6Network")?.unbind();
 
