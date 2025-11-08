@@ -157,8 +157,8 @@ The `examples/` directory contains complete working examples demonstrating vario
 Run any example:
 
 ```bash
-.venv/bin/python examples/basic_usage.py
-.venv/bin/python examples/batch_processing.py
+uv run python examples/basic_usage.py
+uv run python examples/batch_processing.py
 ```
 
 ## Documentation
@@ -179,13 +179,13 @@ Run the included benchmarks (after building from source):
 
 ```bash
 # Single lookup benchmark
-.venv/bin/python benchmark.py --file /var/lib/GeoIP/GeoIP2-City.mmdb --count 250000
+uv run python benchmark.py --file /var/lib/GeoIP/GeoIP2-City.mmdb --count 250000
 
 # Comprehensive benchmark across multiple databases
-.venv/bin/python benchmark_comprehensive.py --count 250000
+uv run python benchmark_comprehensive.py --count 250000
 
 # Batch lookup benchmark
-.venv/bin/python benchmark_batch.py --file /var/lib/GeoIP/GeoIP2-City.mmdb --batch-size 100
+uv run python benchmark_batch.py --file /var/lib/GeoIP/GeoIP2-City.mmdb --batch-size 100
 ```
 
 ## Testing
