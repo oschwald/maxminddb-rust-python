@@ -371,7 +371,10 @@ class BaseTestReader(unittest.TestCase):
         reader.close()
 
     def test_missing_database(self) -> None:
-        with self.assertRaisesRegex(FileNotFoundError, "No such file or directory"):
+        with self.assertRaisesRegex(
+            FileNotFoundError,
+            "No such file or directory|The system cannot find the file specified",
+        ):
             open_database("file-does-not-exist.mmdb", self.mode)
 
     def test_nondatabase(self) -> None:
