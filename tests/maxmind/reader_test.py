@@ -380,10 +380,10 @@ class BaseTestReader(unittest.TestCase):
     def test_nondatabase(self) -> None:
         with self.assertRaisesRegex(
             InvalidDatabaseError,
-            r"Error opening database file \(README.rst\). "
+            r"Error opening database file \(README.md\). "
             r"Is this a valid MaxMind DB file\?",
         ):
-            open_database("README.rst", self.mode)
+            open_database("README.md", self.mode)
 
     # This is from https://github.com/maxmind/MaxMind-DB-Reader-python/issues/58
     def test_database_with_invalid_utf8_key(self) -> None:
