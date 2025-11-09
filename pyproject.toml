@@ -36,6 +36,9 @@ keywords = ["maxmind", "geoip", "geolocation", "ip-address", "mmdb"]
 Homepage = "https://github.com/oschwald/maxminddb-rust-python"
 Repository = "https://github.com/oschwald/maxminddb-rust-python"
 "Bug Tracker" = "https://github.com/oschwald/maxminddb-rust-python/issues"
+Changelog = "https://github.com/oschwald/maxminddb-rust-python/blob/main/CHANGELOG.md"
+"Migration Guide" = "https://github.com/oschwald/maxminddb-rust-python/blob/main/MIGRATION.md"
+Contributing = "https://github.com/oschwald/maxminddb-rust-python/blob/main/CONTRIBUTING.md"
 
 [project.optional-dependencies]
 test = ["pytest>=8.3.5"]

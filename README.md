@@ -143,10 +143,10 @@ reader = maxminddb_rust.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=ma
 
 The `examples/` directory contains complete working examples demonstrating various use cases:
 
-- **[basic_usage.py](examples/basic_usage.py)** - Simple IP lookups, metadata access, and database lifecycle
-- **[context_manager.py](examples/context_manager.py)** - Using `with` statement for automatic resource cleanup
-- **[iterator_demo.py](examples/iterator_demo.py)** - Iterating over all networks in the database
-- **[batch_processing.py](examples/batch_processing.py)** - High-performance batch lookups with `get_many()`
+- **[basic_usage.py](https://github.com/oschwald/maxminddb-rust-python/blob/main/examples/basic_usage.py)** - Simple IP lookups, metadata access, and database lifecycle
+- **[context_manager.py](https://github.com/oschwald/maxminddb-rust-python/blob/main/examples/context_manager.py)** - Using `with` statement for automatic resource cleanup
+- **[iterator_demo.py](https://github.com/oschwald/maxminddb-rust-python/blob/main/examples/iterator_demo.py)** - Iterating over all networks in the database
+- **[batch_processing.py](https://github.com/oschwald/maxminddb-rust-python/blob/main/examples/batch_processing.py)** - High-performance batch lookups with `get_many()`
 
 Run any example:
 
@@ -164,8 +164,8 @@ uv run python examples/batch_processing.py
   help(maxminddb_rust.Reader.get)
   ```
 - **Type Hints**: Full type stub file (`maxminddb_rust.pyi`) included for IDE autocomplete and type checking
-- **Changelog**: See [CHANGELOG.md](CHANGELOG.md) for version history and release notes
-- **Migration Guide**: See [MIGRATION.md](MIGRATION.md) for migrating from the official `maxminddb` package
+- **Changelog**: See [CHANGELOG.md](https://github.com/oschwald/maxminddb-rust-python/blob/main/CHANGELOG.md) for version history and release notes
+- **Migration Guide**: See [MIGRATION.md](https://github.com/oschwald/maxminddb-rust-python/blob/main/MIGRATION.md) for migrating from the official `maxminddb` package
 
 ## Benchmarking
 
@@ -197,9 +197,9 @@ uv run pytest
 uv run pytest -v
 ```
 
-For contributor information including development setup, code quality tools, and test syncing, see [CONTRIBUTING.md](CONTRIBUTING.md).
+For contributor information including development setup, code quality tools, and test syncing, see [CONTRIBUTING.md](https://github.com/oschwald/maxminddb-rust-python/blob/main/CONTRIBUTING.md).
 
-For upstream test compatibility and syncing instructions, see [tests/maxmind/README.md](tests/maxmind/README.md).
+For upstream test compatibility and syncing instructions, see [tests/maxmind/README.md](https://github.com/oschwald/maxminddb-rust-python/blob/main/tests/maxmind/README.md).
 
 ## License
 
@@ -207,4 +207,4 @@ ISC License - see LICENSE file for details.
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code quality guidelines, and pull request procedures.
+Contributions are welcome! Please see [CONTRIBUTING.md](https://github.com/oschwald/maxminddb-rust-python/blob/main/CONTRIBUTING.md) for development setup, code quality guidelines, and pull request procedures.
