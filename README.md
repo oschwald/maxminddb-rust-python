@@ -1,6 +1,6 @@
 # maxminddb-rust
 
-A high-performance Rust-based Python module for MaxMind DB files. Provides 100% API compatibility with the official [`maxminddb`](https://github.com/maxmind/MaxMind-DB-Reader-python) module with significantly better performance.
+A high-performance Rust-based Python module for MaxMind DB files. Provides 100% API compatibility with the official [`maxminddb`](https://github.com/maxmind/MaxMind-DB-Reader-python) module with similar performance.
 
 ## Performance
 
@@ -13,14 +13,6 @@ Benchmark results (250,000 lookups with random IPs):
 | GeoIP2-City      | 117MB | 308,254     |
 
 **Average: 373,301 lookups/second**
-
-### Optimizations Implemented
-
-- **Memory-mapped files**: Uses `mmap` for efficient file I/O instead of loading entire database into memory
-- **GIL management**: Releases Python GIL during IP parsing and database lookups for better concurrency
-- **Link-time optimization**: Aggressive compiler optimizations (thin LTO, single codegen unit)
-- **Zero-copy operations**: Minimal data copying between Rust and Python
-- **Batch lookups**: `get_many()` method for processing multiple IPs efficiently
 
 ## Features
 
@@ -292,15 +284,6 @@ If linting fails during a commit, fix the issues with:
 # Automatically fix formatting on staged files
 precious tidy --staged
 ```
-
-### Continuous Integration
-
-GitHub Actions workflows automatically run:
-
-- **Tests** on Python 3.9-3.13 across Linux, macOS, and Windows
-- **Linters** including clippy, rustfmt, ruff, and prettier
-- **Security scans** with CodeQL and zizmor
-- **Dependency updates** via Dependabot
 
 ## License
 
