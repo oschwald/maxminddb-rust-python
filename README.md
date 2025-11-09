@@ -45,7 +45,7 @@ This package provides **100% API compatibility** with the official [`maxminddb`]
 
 ## Installation
 
-### From PyPI (when published)
+### From PyPI
 
 ```bash
 pip install maxminddb-rust
