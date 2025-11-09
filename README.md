@@ -182,108 +182,22 @@ uv run python benchmark_batch.py --file /var/lib/GeoIP/GeoIP2-City.mmdb --batch-
 
 ## Testing
 
-### Running Tests
-
-This project includes upstream compatibility tests from MaxMind-DB-Reader-python to ensure API compatibility.
+This project includes comprehensive tests, including upstream compatibility tests from MaxMind-DB-Reader-python.
 
 ```bash
 # Initialize test data submodule (first time only)
 git submodule update --init --recursive
 
-# Install test dependencies
-uv pip install pytest
-
 # Run all tests
 uv run pytest
 
-# Run only upstream compatibility tests
-uv run pytest tests/maxmind/
+# Run with verbose output
+uv run pytest -v
 ```
 
-### Upstream Test License
+For contributor information including development setup, code quality tools, and test syncing, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-The tests in `tests/maxmind/` are copyright MaxMind, Inc. and licensed under Apache License 2.0. See `tests/maxmind/UPSTREAM_LICENSE` for full license text.
-
-The test data in `tests/data/` is from the [MaxMind-DB repository](https://github.com/maxmind/MaxMind-DB) and is licensed under Creative Commons Attribution-ShareAlike 3.0.
-
-### Syncing Upstream Tests
-
-To sync with latest upstream tests from MaxMind-DB-Reader-python:
-
-```bash
-# Update local copy of upstream repo
-cd /path/to/MaxMind-DB-Reader-python
-git pull
-
-# Copy updated test file
-cp tests/reader_test.py /path/to/maxminddb-rust-python/tests/maxmind/
-
-# Re-apply required adaptations:
-# 1. Add copyright header
-# 2. Update imports: from maxminddb.const import (...) → from maxminddb import (...)
-# 3. Update imports: from maxminddb.reader import Reader → from maxminddb import Reader
-# 4. Add: import pytest
-# 5. Add @pytest.mark.skip to TestFileReader and TestFDReader
-# 6. Replace maxminddb.reader.Reader with maxminddb.Reader
-# 7. Replace maxminddb.extension.Reader with maxminddb.Reader
-# 8. Update test data paths: tests/data/ → tests/data/test-data/
-
-# Update test data submodule
-cd /path/to/maxminddb-rust-python
-git submodule update --remote tests/data
-```
-
-## Development
-
-### Code Quality Tools
-
-This project uses [precious](https://github.com/houseabsolute/precious/) to manage linters and formatters. Install precious and run:
-
-```bash
-# Lint all files
-precious lint --all
-
-# Format all files
-precious tidy --all
-
-# Lint specific files
-precious lint path/to/file.py
-
-# Run a specific linter
-precious lint --all --command rustfmt
-```
-
-Individual tools can also be run directly:
-
-```bash
-# Rust
-cargo clippy --lib --all-features -- -D warnings
-cargo fmt --all
-
-# Python
-ruff check .
-ruff format .
-
-# Markdown/YAML
-prettier --check "**/*.md" "**/*.yml"
-prettier --write "**/*.md" "**/*.yml"
-```
-
-### Git Pre-commit Hook
-
-The repository includes a pre-commit hook that automatically runs precious lint on staged files before each commit. To enable it:
-
-```bash
-# Configure git to use the .githooks directory
-git config core.hooksPath .githooks
-```
-
-If linting fails during a commit, fix the issues with:
-
-```bash
-# Automatically fix formatting on staged files
-precious tidy --staged
-```
+For upstream test compatibility and syncing instructions, see [tests/maxmind/README.md](tests/maxmind/README.md).
 
 ## License
 
@@ -291,4 +205,4 @@ ISC License - see LICENSE file for details.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code quality guidelines, and pull request procedures.
