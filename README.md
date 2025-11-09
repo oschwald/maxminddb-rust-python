@@ -4,15 +4,17 @@ A high-performance Rust-based Python module for MaxMind DB files. Provides 100% 
 
 ## Performance
 
-Benchmark results (250,000 lookups with random IPs):
+Benchmark results using 10 million random IP lookups per database (single-threaded):
 
 | Database         | Size  | Lookups/sec |
 | ---------------- | ----- | ----------- |
-| GeoLite2-Country | 9.4MB | 492,768     |
-| GeoLite2-City    | 61MB  | 318,882     |
-| GeoIP2-City      | 117MB | 308,254     |
+| GeoLite2-Country | 9.4MB | 527,297     |
+| GeoLite2-City    | 61MB  | 338,879     |
+| GeoIP2-City      | 117MB | 332,827     |
 
-**Average: 373,301 lookups/second**
+**Test Environment:** Intel Core Ultra 7 265K (20 cores, up to 6.5GHz), Linux 6.17
+
+These are single-threaded results; the reader is fully thread-safe and can be shared across multiple threads for parallel lookups.
 
 ## Features
 
