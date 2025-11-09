@@ -49,6 +49,10 @@ jobs:
       - name: Install maturin
         run: pip install maturin
 
+      - name: Set up Zig
+        if: runner.os == 'Windows'
+        uses: mlugg/setup-zig@8d6198c65fb0feaa111df26e6b467fea8345e46f # v2.0.5
+
       - name: Set up QEMU
         if: runner.os == 'Linux' && matrix.target == 'aarch64'
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
