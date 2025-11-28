@@ -1,6 +1,6 @@
 [package]
 name = "maxminddb-rust"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Gregory Oschwald <oschwald@gmail.com>"]
 description = "Rust-based Python binding for MaxMind DB - high-performance alternative to maxminddb"
