@@ -1,5 +1,5 @@
 use ::maxminddb as maxminddb_crate;
-use maxminddb_crate::{MaxMindDbError, Reader as MaxMindReader, Within, WithinItem};
+use maxminddb_crate::{MaxMindDbError, Reader as MaxMindReader, Within, WithinOptions};
 use memmap2::Mmap;
 use pyo3::{
     conversion::IntoPyObjectExt,
@@ -253,8 +253,14 @@ impl ReaderSource {
         ip: IpAddr,
     ) -> Result<Option<PyDecodedValue>, maxminddb_crate::MaxMindDbError> {
         match self {
-            ReaderSource::Mmap(reader) => reader.lookup(ip),
-            ReaderSource::Memory(reader) => reader.lookup(ip),
+            ReaderSource::Mmap(reader) => {
+                let result = reader.lookup(ip)?;
+                result.decode()
+            }
+            ReaderSource::Memory(reader) => {
+                let result = reader.lookup(ip)?;
+                result.decode()
+            }
         }
     }
 
@@ -264,8 +270,20 @@ impl ReaderSource {
         ip: IpAddr,
     ) -> Result<(Option<PyDecodedValue>, usize), maxminddb_crate::MaxMindDbError> {
         match self {
-            ReaderSource::Mmap(reader) => reader.lookup_prefix(ip),
-            ReaderSource::Memory(reader) => reader.lookup_prefix(ip),
+            ReaderSource::Mmap(reader) => {
+                let result = reader.lookup(ip)?;
+                let network = result.network()?;
+                let prefix_len = convert_prefix_len(ip, network);
+                let data = result.decode()?;
+                Ok((data, prefix_len))
+            }
+            ReaderSource::Memory(reader) => {
+                let result = reader.lookup(ip)?;
+                let network = result.network()?;
+                let prefix_len = convert_prefix_len(ip, network);
+                let data = result.decode()?;
+                Ok((data, prefix_len))
+            }
         }
     }
 
@@ -275,6 +293,22 @@ impl ReaderSource {
             ReaderSource::Mmap(reader) => &reader.metadata,
             ReaderSource::Memory(reader) => &reader.metadata,
         }
+    }
+}
+
+/// Convert prefix length from database network to the perspective of the queried IP.
+/// When an IPv4 address is looked up in an IPv6 database, the network is returned
+/// in IPv6 terms. We need to convert it back to IPv4 terms for the user.
+#[inline]
+fn convert_prefix_len(queried_ip: IpAddr, network: ipnetwork::IpNetwork) -> usize {
+    let prefix = network.prefix() as usize;
+    match (queried_ip, network) {
+        // IPv4 query, IPv6 result: convert from IPv6 prefix to IPv4 prefix
+        // IPv4-mapped IPv6 addresses have a 96-bit prefix (::ffff:0:0/96)
+        // So the IPv4-relevant part starts at bit 96
+        (IpAddr::V4(_), ipnetwork::IpNetwork::V6(_)) => prefix.saturating_sub(96),
+        // Same address family: use prefix as-is
+        _ => prefix,
     }
 }
 
@@ -449,7 +483,7 @@ impl Reader {
         match lookup_result {
             Ok(Some(data)) => Ok(data.into_py()),
             Ok(None) => Ok(py.None()),
-            Err(MaxMindDbError::InvalidDatabase(_) | MaxMindDbError::Decoding(_)) => {
+            Err(MaxMindDbError::InvalidDatabase { .. } | MaxMindDbError::Decoding { .. }) => {
                 Err(InvalidDatabaseError::new_err(ERR_BAD_DATA))
             }
             Err(err) => Err(PyValueError::new_err(format!("Database error: {err}"))),
@@ -504,7 +538,7 @@ impl Reader {
                 Ok((py_obj, prefix_len))
             }
             Ok((None, prefix_len)) => Ok((py.None(), prefix_len)),
-            Err(MaxMindDbError::InvalidDatabase(_) | MaxMindDbError::Decoding(_)) => {
+            Err(MaxMindDbError::InvalidDatabase { .. } | MaxMindDbError::Decoding { .. }) => {
                 Err(InvalidDatabaseError::new_err(ERR_BAD_DATA))
             }
             Err(err) => Err(PyValueError::new_err(format!("Database error: {err}"))),
@@ -565,7 +599,7 @@ impl Reader {
             match result {
                 Ok(Some(data)) => objects.push(data.into_py()),
                 Ok(None) => objects.push(py.None()),
-                Err(MaxMindDbError::InvalidDatabase(_) | MaxMindDbError::Decoding(_)) => {
+                Err(MaxMindDbError::InvalidDatabase { .. } | MaxMindDbError::Decoding { .. }) => {
                     return Err(InvalidDatabaseError::new_err(ERR_BAD_DATA));
                 }
                 Err(err) => {
@@ -786,15 +820,21 @@ impl ReaderIterator {
         let network_obj = class.call1((network_str,))?;
 
         // Record is already materialized as a Python object
-        let data_obj = next_item.info.into_py();
+        let data_obj = next_item.data.into_py();
 
         Ok(Some((network_obj.unbind(), data_obj)))
     }
 }
 
 enum ReaderWithin {
-    Mmap(Within<'static, PyDecodedValue, Mmap>),
-    Memory(Within<'static, PyDecodedValue, Vec<u8>>),
+    Mmap(Within<'static, Mmap>),
+    Memory(Within<'static, Vec<u8>>),
+}
+
+/// Result from the within iterator, containing network and decoded data
+struct WithinResult {
+    ip_net: ipnetwork::IpNetwork,
+    data: PyDecodedValue,
 }
 
 impl ReaderWithin {
@@ -802,36 +842,55 @@ impl ReaderWithin {
         reader: &Arc<ReaderSource>,
         network: ipnetwork::IpNetwork,
     ) -> Result<Self, maxminddb_crate::MaxMindDbError> {
+        let options = WithinOptions::default();
         match reader.as_ref() {
             ReaderSource::Mmap(inner) => {
-                let iter = inner.within::<PyDecodedValue>(network)?;
+                let iter = inner.within(network, options)?;
                 // SAFETY: the iterator holds a reference into `inner`. We store an Arc guard
                 // alongside it so the reader outlives the transmuted iterator.
                 Ok(Self::Mmap(unsafe {
-                    transmute::<Within<'_, PyDecodedValue, Mmap>, Within<'_, PyDecodedValue, Mmap>>(
-                        iter,
-                    )
+                    transmute::<Within<'_, Mmap>, Within<'_, Mmap>>(iter)
                 }))
             }
             ReaderSource::Memory(inner) => {
-                let iter = inner.within::<PyDecodedValue>(network)?;
+                let iter = inner.within(network, options)?;
                 // SAFETY: same as above, the Arc guard in `ReaderIterator` keeps the reader alive.
                 Ok(Self::Memory(unsafe {
-                    transmute::<
-                        Within<'_, PyDecodedValue, Vec<u8>>,
-                        Within<'_, PyDecodedValue, Vec<u8>>,
-                    >(iter)
+                    transmute::<Within<'_, Vec<u8>>, Within<'_, Vec<u8>>>(iter)
                 }))
             }
         }
     }
 
-    fn next(
-        &mut self,
-    ) -> Option<Result<WithinItem<PyDecodedValue>, maxminddb_crate::MaxMindDbError>> {
+    fn next(&mut self) -> Option<Result<WithinResult, maxminddb_crate::MaxMindDbError>> {
+        fn process_lookup<S: AsRef<[u8]>>(
+            lookup_result: maxminddb_crate::LookupResult<'_, S>,
+        ) -> Result<WithinResult, MaxMindDbError> {
+            let network = lookup_result.network()?;
+            let ip_net =
+                ipnetwork::IpNetwork::new(network.network(), network.prefix()).map_err(|e| {
+                    MaxMindDbError::InvalidDatabase {
+                        message: format!("Invalid network from database: {}", e),
+                        offset: None,
+                    }
+                })?;
+            let data: Option<PyDecodedValue> = lookup_result.decode()?;
+            let data = data.ok_or_else(|| MaxMindDbError::InvalidDatabase {
+                message: "No data in database record".to_string(),
+                offset: None,
+            })?;
+            Ok(WithinResult { ip_net, data })
+        }
+
         match self {
-            ReaderWithin::Mmap(iter) => iter.next(),
-            ReaderWithin::Memory(iter) => iter.next(),
+            ReaderWithin::Mmap(iter) => {
+                let result = iter.next()?;
+                Some(result.and_then(process_lookup))
+            }
+            ReaderWithin::Memory(iter) => {
+                let result = iter.next()?;
+                Some(result.and_then(process_lookup))
+            }
         }
     }
 }
