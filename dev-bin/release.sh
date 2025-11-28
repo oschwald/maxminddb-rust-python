@@ -47,7 +47,7 @@ cargo test
 maturin develop
 
 # Run Python tests
-pytest
+uv run pytest
 
 echo $'\nDiff:'
 git diff
