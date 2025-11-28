@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Upgraded maxminddb crate from 0.26.0 to 0.27.0. This brings internal
+  improvements from the upstream Rust library with no breaking changes
+  to the Python API.
+
 ## [0.1.1] - 2025-11-08
 
 - Attempt at republishing with tweaked workflow.

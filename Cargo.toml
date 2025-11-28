@@ -13,7 +13,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ipnetwork = "0.21"
-maxminddb = "0.26.0"
+maxminddb = "0.27.0"
 memmap2 = "0.9"
 pyo3 = { version = "0.27.1", features = ["extension-module", "generate-import-lib"] }
 serde = "1.0"
