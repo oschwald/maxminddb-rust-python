@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Upgraded maxminddb crate from 0.27.0 to 0.27.1.
+- Enabled `simdutf8` feature in `maxminddb` crate. This improves lookup
+  performance by using SIMD instructions for faster UTF-8 validation.
 
 ## [0.2.0] - 2025-11-28
 
