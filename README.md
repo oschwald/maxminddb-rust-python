@@ -37,6 +37,9 @@ This package provides **100% API compatibility** with the official [`maxminddb`]
 **Extensions (not in original):**
 
 - ⭐ `get_many()` - Batch lookup method for processing multiple IPs efficiently
+- ⭐ `get_path()` - Efficiently retrieve a specific field from a record (e.g.,
+  `('country', 'iso_code')`) without decoding the entire record. This can be
+  over 6x faster than `get()` when only partial data is needed.
 
 **Not Yet Implemented:**
 
@@ -108,6 +111,24 @@ for ip, result in zip(ips, results):
     print(f"{ip}: {result}")
 ```
 
+### Selective Field Lookup (Extension)
+
+The `get_path()` method allows you to efficiently retrieve a specific field from a record:
+
+```python
+import maxminddb_rust
+
+reader = maxminddb_rust.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb")
+
+# Retrieve specific field without decoding the entire record
+# Path elements can be strings (map keys) or integers (array indices)
+iso_code = reader.get_path("8.8.8.8", ("country", "iso_code"))
+print(f"ISO Code: {iso_code}")
+
+# Accessing arrays by index
+# e.g., reader.get_path("8.8.8.8", ("subdivisions", 0, "iso_code"))
+```
+
 ### Iterator Support
 
 Iterate over all networks in the database:
@@ -135,8 +156,11 @@ reader = maxminddb_rust.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=ma
 # MODE_MMAP: Explicitly use memory-mapped files
 reader = maxminddb_rust.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb_rust.MODE_MMAP)
 
-# MODE_MEMORY: Load entire database into memory (useful for embedded systems or when file handle limits are a concern)
-reader = maxminddb_rust.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb_rust.MODE_MEMORY)
+# MODE_MEMORY: Load entire database into memory (useful for embedded systems
+# or when file handle limits are a concern)
+reader = maxminddb_rust.open_database(
+    "/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb_rust.MODE_MEMORY
+)
 ```
 
 ## Examples
@@ -147,6 +171,8 @@ The `examples/` directory contains complete working examples demonstrating vario
 - **[context_manager.py](https://github.com/oschwald/maxminddb-rust-python/blob/main/examples/context_manager.py)** - Using `with` statement for automatic resource cleanup
 - **[iterator_demo.py](https://github.com/oschwald/maxminddb-rust-python/blob/main/examples/iterator_demo.py)** - Iterating over all networks in the database
 - **[batch_processing.py](https://github.com/oschwald/maxminddb-rust-python/blob/main/examples/batch_processing.py)** - High-performance batch lookups with `get_many()`
+- **[benchmark_path.py](https://github.com/oschwald/maxminddb-rust-python/blob/main/examples/benchmark_path.py)**
+  - Performance comparison between `get()` and `get_path()`
 
 Run any example:
 

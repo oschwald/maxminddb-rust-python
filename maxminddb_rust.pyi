@@ -8,7 +8,7 @@ implemented in Rust using PyO3 with 100% API compatibility.
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 from os import PathLike
 from types import TracebackType
-from typing import Any, Iterator, Literal, Optional, Union
+from typing import Any, Iterator, Literal, Optional, Sequence, Union
 
 __all__ = [
     "Reader",
@@ -149,6 +149,32 @@ class Reader:
         Raises:
             ValueError: If the database has been closed or the IP address is invalid.
             InvalidDatabaseError: If the database data is corrupt or invalid.
+        """
+        ...
+
+    def get_path(
+        self,
+        ip_address: Union[str, IPv4Address, IPv6Address],
+        path: Sequence[Union[str, int]],
+    ) -> Optional[Any]:
+        """
+        Query the database for a specific path within the record.
+
+        This method is more efficient than get() when you only need a specific field
+        (e.g., country code) from the record, as it avoids decoding the entire record.
+
+        Args:
+            ip_address: The IP address to look up.
+            path: A sequence (tuple or list) of strings or integers representing the path to the data.
+
+        Returns:
+            The value at the specified path, or None if the IP address or path is not found.
+
+        Example:
+            >>> reader.get_path('8.8.8.8', ('country', 'iso_code'))
+            'US'
+            >>> reader.get_path('8.8.8.8', ('subdivisions', 0, 'iso_code'))
+            'CA'
         """
         ...
 

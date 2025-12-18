@@ -1,5 +1,7 @@
 use ::maxminddb as maxminddb_crate;
-use maxminddb_crate::{MaxMindDbError, Reader as MaxMindReader, Within, WithinOptions};
+use maxminddb_crate::{
+    MaxMindDbError, PathElement, Reader as MaxMindReader, Within, WithinOptions,
+};
 use memmap2::Mmap;
 use pyo3::{
     conversion::IntoPyObjectExt,
@@ -240,6 +242,11 @@ const ERR_CLOSED_DB: &str = "Attempt to read from a closed MaxMind DB.";
 const ERR_BAD_DATA: &str =
     "The MaxMind DB file's data section contains bad data (unknown data type or corrupt data)";
 
+enum OwnedPathElement {
+    Key(String),
+    Index(usize),
+}
+
 /// Enum to handle different reader source types
 enum ReaderSource {
     Mmap(MaxMindReader<Mmap>),
@@ -283,6 +290,36 @@ impl ReaderSource {
                 let prefix_len = convert_prefix_len(ip, network);
                 let data = result.decode()?;
                 Ok((data, prefix_len))
+            }
+        }
+    }
+
+    #[inline]
+    fn lookup_path(
+        &self,
+        ip: IpAddr,
+        path: &[OwnedPathElement],
+    ) -> Result<Option<PyDecodedValue>, maxminddb_crate::MaxMindDbError> {
+        let path_elements: Vec<PathElement> = path
+            .iter()
+            .map(|e| match e {
+                OwnedPathElement::Key(s) => PathElement::Key(s.as_str()),
+
+                OwnedPathElement::Index(i) => PathElement::Index(*i),
+            })
+            .collect();
+
+        match self {
+            ReaderSource::Mmap(reader) => {
+                let result = reader.lookup(ip)?;
+
+                result.decode_path(&path_elements)
+            }
+
+            ReaderSource::Memory(reader) => {
+                let result = reader.lookup(ip)?;
+
+                result.decode_path(&path_elements)
             }
         }
     }
@@ -481,6 +518,64 @@ impl Reader {
         let lookup_result = py.detach(|| reader.lookup(parsed_ip.addr));
 
         match lookup_result {
+            Ok(Some(data)) => Ok(data.into_py()),
+            Ok(None) => Ok(py.None()),
+            Err(MaxMindDbError::InvalidDatabase { .. } | MaxMindDbError::Decoding { .. }) => {
+                Err(InvalidDatabaseError::new_err(ERR_BAD_DATA))
+            }
+            Err(err) => Err(PyValueError::new_err(format!("Database error: {err}"))),
+        }
+    }
+
+    /// Query the database for a specific path within the record.
+    ///
+    /// This method is more efficient than get() when you only need a specific field
+    /// (e.g., country code) from the record, as it avoids decoding the entire record.
+    ///
+    /// Args:
+    ///     ip_address: The IP address to look up. May be a string (e.g., '1.2.3.4')
+    ///         or an ipaddress.IPv4Address or ipaddress.IPv6Address object.
+    ///     path: A sequence (tuple or list) of strings or integers representing the
+    ///         path to the data.
+    ///
+    /// Returns:
+    ///     The value at the specified path, or None if the IP address or path is
+    ///     not found.
+    ///
+    /// Example:
+    ///     >>> reader.get_path('8.8.8.8', ('country', 'iso_code'))
+    ///     'US'
+    fn get_path(
+        &self,
+        py: Python,
+        ip_address: &Bound<'_, PyAny>,
+        path: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        // Quick check if database is closed
+        if self.closed.load(Ordering::Acquire) {
+            return Err(PyValueError::new_err(ERR_CLOSED_DB));
+        }
+
+        // Parse IP address
+        let parsed_ip = parse_ip_address(ip_address)?;
+
+        if self.ip_version == 4 && matches!(parsed_ip.addr, IpAddr::V6(_)) {
+            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip.addr)));
+        }
+
+        // Parse path
+        let owned_path = parse_path(path)?;
+
+        let reader = self.get_reader()?;
+
+        // We need to keep the Strings alive while we use them as &str
+        // This is a bit tricky because we're crossing the thread boundary with py.detach
+        // But since we are passing ownership of `path` (Vec<String>) into the closure,
+        // and constructing the Vec<&str> inside, it should work.
+
+        let result = py.detach(move || reader.lookup_path(parsed_ip.addr, &owned_path));
+
+        match result {
             Ok(Some(data)) => Ok(data.into_py()),
             Ok(None) => Ok(py.None()),
             Err(MaxMindDbError::InvalidDatabase { .. } | MaxMindDbError::Decoding { .. }) => {
@@ -893,6 +988,34 @@ impl ReaderWithin {
             }
         }
     }
+}
+
+fn parse_path(path: &Bound<'_, PyAny>) -> PyResult<Vec<OwnedPathElement>> {
+    let mut owned_path = Vec::new();
+    if path.is_instance_of::<PyString>() {
+        return Err(PyTypeError::new_err(
+            "Path must be a sequence (list or tuple)",
+        ));
+    }
+    if let Ok(iterator) = path.try_iter() {
+        for item in iterator {
+            let item = item?;
+            if let Ok(s) = item.extract::<String>() {
+                owned_path.push(OwnedPathElement::Key(s));
+            } else if let Ok(i) = item.extract::<usize>() {
+                owned_path.push(OwnedPathElement::Index(i));
+            } else {
+                return Err(PyTypeError::new_err(
+                    "Path elements must be strings or integers",
+                ));
+            }
+        }
+    } else {
+        return Err(PyTypeError::new_err(
+            "Path must be a sequence (list or tuple)",
+        ));
+    }
+    Ok(owned_path)
 }
 
 struct ParsedIp {

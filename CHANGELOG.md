@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.1] - 2025-12-18
+## [0.3.0] - 2025-12-18
+
+### Added
+
+- Added `get_path()` method to `Reader` class. This allows high-performance
+  retrieval of specific fields (e.g.,
+  `reader.get_path(ip, ('country', 'iso_code'))`) without decoding the entire
+  record. This can be over 6x faster than `get()` when only partial data is
+  needed.
 
 ### Changed
 
