@@ -51,7 +51,7 @@ jobs:
 
       - name: Set up Zig
         if: runner.os == 'Windows'
-        uses: mlugg/setup-zig@fa65c4058643678a4e4a9a60513944a7d8d35440 # v2.1.0
+        uses: mlugg/setup-zig@e7d1537c378b83b8049f65dda471d87a2f7b2df2 # v2.2.0
 
       - name: Set up QEMU
         if: runner.os == 'Linux' && matrix.target == 'aarch64'
