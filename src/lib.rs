@@ -984,6 +984,13 @@ fn next_within<S: AsRef<[u8]>>(
     Some(result.and_then(process_within_lookup))
 }
 
+#[inline]
+unsafe fn extend_within_lifetime<S: AsRef<[u8]>>(iter: Within<'_, S>) -> Within<'static, S> {
+    // SAFETY: The caller must ensure the reader backing `iter` outlives returned iterator.
+    // `ReaderIterator` stores an Arc guard that guarantees this.
+    unsafe { transmute::<Within<'_, S>, Within<'static, S>>(iter) }
+}
+
 impl ReaderWithin {
     fn new(
         reader: &Arc<ReaderSource>,
@@ -993,18 +1000,11 @@ impl ReaderWithin {
         match reader.as_ref() {
             ReaderSource::Mmap(inner) => {
                 let iter = inner.within(network, options)?;
-                // SAFETY: the iterator holds a reference into `inner`. We store an Arc guard
-                // alongside it so the reader outlives the transmuted iterator.
-                Ok(Self::Mmap(unsafe {
-                    transmute::<Within<'_, Mmap>, Within<'_, Mmap>>(iter)
-                }))
+                Ok(Self::Mmap(unsafe { extend_within_lifetime(iter) }))
             }
             ReaderSource::Memory(inner) => {
                 let iter = inner.within(network, options)?;
-                // SAFETY: same as above, the Arc guard in `ReaderIterator` keeps the reader alive.
-                Ok(Self::Memory(unsafe {
-                    transmute::<Within<'_, Vec<u8>>, Within<'_, Vec<u8>>>(iter)
-                }))
+                Ok(Self::Memory(unsafe { extend_within_lifetime(iter) }))
             }
         }
     }
