@@ -13,7 +13,6 @@ use pyo3::{
 };
 use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 use std::{
-    borrow::Cow,
     collections::BTreeMap,
     fmt,
     fs::File,
@@ -212,9 +211,9 @@ impl<'de, 'py> Visitor<'de> for PyValueVisitor<'py> {
         A: MapAccess<'de>,
     {
         let dict = PyDict::new(self.py);
-        while let Some(key) = map.next_key::<Cow<'de, str>>()? {
+        while let Some(key) = map.next_key::<&'de str>()? {
             let value = map.next_value_seed(PyValueSeed::new(self.py))?;
-            dict.set_item(key.as_ref(), value.into_py())
+            dict.set_item(key, value.into_py())
                 .map_err(pyerr_to_de_error)?;
         }
         Ok(PyDecodedValue::new(dict.into_any().unbind()))
