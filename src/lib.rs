@@ -957,6 +957,33 @@ struct WithinResult {
     data: PyDecodedValue,
 }
 
+#[inline]
+fn process_within_lookup<S: AsRef<[u8]>>(
+    lookup_result: maxminddb_crate::LookupResult<'_, S>,
+) -> Result<WithinResult, MaxMindDbError> {
+    let network = lookup_result.network()?;
+    let ip_net = ipnetwork::IpNetwork::new(network.network(), network.prefix()).map_err(|e| {
+        MaxMindDbError::InvalidDatabase {
+            message: format!("Invalid network from database: {}", e),
+            offset: None,
+        }
+    })?;
+    let data: Option<PyDecodedValue> = lookup_result.decode()?;
+    let data = data.ok_or_else(|| MaxMindDbError::InvalidDatabase {
+        message: "No data in database record".to_string(),
+        offset: None,
+    })?;
+    Ok(WithinResult { ip_net, data })
+}
+
+#[inline]
+fn next_within<S: AsRef<[u8]>>(
+    iter: &mut Within<'static, S>,
+) -> Option<Result<WithinResult, MaxMindDbError>> {
+    let result = iter.next()?;
+    Some(result.and_then(process_within_lookup))
+}
+
 impl ReaderWithin {
     fn new(
         reader: &Arc<ReaderSource>,
@@ -983,34 +1010,9 @@ impl ReaderWithin {
     }
 
     fn next(&mut self) -> Option<Result<WithinResult, maxminddb_crate::MaxMindDbError>> {
-        fn process_lookup<S: AsRef<[u8]>>(
-            lookup_result: maxminddb_crate::LookupResult<'_, S>,
-        ) -> Result<WithinResult, MaxMindDbError> {
-            let network = lookup_result.network()?;
-            let ip_net =
-                ipnetwork::IpNetwork::new(network.network(), network.prefix()).map_err(|e| {
-                    MaxMindDbError::InvalidDatabase {
-                        message: format!("Invalid network from database: {}", e),
-                        offset: None,
-                    }
-                })?;
-            let data: Option<PyDecodedValue> = lookup_result.decode()?;
-            let data = data.ok_or_else(|| MaxMindDbError::InvalidDatabase {
-                message: "No data in database record".to_string(),
-                offset: None,
-            })?;
-            Ok(WithinResult { ip_net, data })
-        }
-
         match self {
-            ReaderWithin::Mmap(iter) => {
-                let result = iter.next()?;
-                Some(result.and_then(process_lookup))
-            }
-            ReaderWithin::Memory(iter) => {
-                let result = iter.next()?;
-                Some(result.and_then(process_lookup))
-            }
+            ReaderWithin::Mmap(iter) => next_within(iter),
+            ReaderWithin::Memory(iter) => next_within(iter),
         }
     }
 }
