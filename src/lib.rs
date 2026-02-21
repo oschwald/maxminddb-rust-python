@@ -9,7 +9,7 @@ use pyo3::{
         PyFileNotFoundError, PyIOError, PyOSError, PyRuntimeError, PyTypeError, PyValueError,
     },
     prelude::*,
-    types::{PyBytes, PyDict, PyList, PyModule, PyString},
+    types::{PyBytes, PyDict, PyList, PyModule, PyString, PyTuple},
 };
 use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 use std::{
@@ -24,7 +24,7 @@ use std::{
     str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, RwLock,
+        Arc, Mutex, RwLock,
     },
 };
 
@@ -247,6 +247,8 @@ enum OwnedPathElement {
     Index(usize),
 }
 
+type CachedPath = (Py<PyTuple>, Arc<Vec<OwnedPathElement>>);
+
 /// Enum to handle different reader source types
 enum ReaderSource {
     Mmap(MaxMindReader<Mmap>),
@@ -418,6 +420,7 @@ struct Reader {
     reader: Arc<RwLock<Option<Arc<ReaderSource>>>>,
     closed: Arc<AtomicBool>,
     ip_version: u16,
+    path_cache: Mutex<Vec<CachedPath>>,
 }
 
 #[pymethods]
@@ -562,8 +565,8 @@ impl Reader {
             return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip.addr)));
         }
 
-        // Parse path
-        let owned_path = parse_path(path)?;
+        // Parse path (cache tuple paths, which are immutable and commonly reused)
+        let owned_path = self.get_or_parse_path(py, path)?;
 
         let reader = self.get_reader()?;
 
@@ -836,6 +839,36 @@ impl Reader {
 
 // Internal helper methods for Reader
 impl Reader {
+    fn get_or_parse_path(
+        &self,
+        py: Python,
+        path: &Bound<'_, PyAny>,
+    ) -> PyResult<Arc<Vec<OwnedPathElement>>> {
+        const PATH_CACHE_MAX_ENTRIES: usize = 64;
+
+        let Ok(path_tuple) = path.cast::<PyTuple>() else {
+            return Ok(Arc::new(parse_path(path)?));
+        };
+        let path_ptr = path_tuple.as_ptr();
+
+        if let Ok(cache) = self.path_cache.lock() {
+            for (cached_tuple, cached_path) in cache.iter() {
+                if cached_tuple.bind(py).as_ptr() == path_ptr {
+                    return Ok(Arc::clone(cached_path));
+                }
+            }
+        }
+
+        let parsed = Arc::new(parse_path(path)?);
+        if let Ok(mut cache) = self.path_cache.lock() {
+            if cache.len() >= PATH_CACHE_MAX_ENTRIES {
+                cache.remove(0);
+            }
+            cache.push((path_tuple.clone().unbind(), Arc::clone(&parsed)));
+        }
+        Ok(parsed)
+    }
+
     /// Get the reader from the internal mutex, returning an error if closed
     #[inline]
     fn get_reader(&self) -> PyResult<Arc<ReaderSource>> {
@@ -1071,6 +1104,7 @@ fn create_reader(source: ReaderSource) -> Reader {
         reader: Arc::new(RwLock::new(Some(Arc::new(source)))),
         closed: Arc::new(AtomicBool::new(false)),
         ip_version,
+        path_cache: Mutex::new(Vec::new()),
     }
 }
 
