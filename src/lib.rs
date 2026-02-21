@@ -13,6 +13,7 @@ use pyo3::{
 };
 use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 use std::{
+    cell::RefCell,
     collections::BTreeMap,
     fmt,
     fs::File,
@@ -26,6 +27,12 @@ use std::{
         Arc, Mutex, RwLock,
     },
 };
+
+thread_local! {
+    static PY_MAP_KEY_CACHE: RefCell<BTreeMap<String, Py<PyString>>> = const { RefCell::new(BTreeMap::new()) };
+}
+
+const PY_MAP_KEY_CACHE_MAX: usize = 256;
 
 // Define InvalidDatabaseError exception (subclass of RuntimeError)
 pyo3::create_exception!(
@@ -213,7 +220,8 @@ impl<'de, 'py> Visitor<'de> for PyValueVisitor<'py> {
         let dict = PyDict::new(self.py);
         while let Some(key) = map.next_key::<&'de str>()? {
             let value = map.next_value_seed(PyValueSeed::new(self.py))?;
-            dict.set_item(key, value.into_py())
+            let py_key = cached_map_key(self.py, key);
+            dict.set_item(py_key.bind(self.py), value.into_py())
                 .map_err(pyerr_to_de_error)?;
         }
         Ok(PyDecodedValue::new(dict.into_any().unbind()))
@@ -226,6 +234,21 @@ fn pyerr_to_de_error<E: de::Error>(err: PyErr) -> E {
 
 fn bound_to_value<E: de::Error>(result: PyResult<Py<PyAny>>) -> Result<PyDecodedValue, E> {
     result.map(PyDecodedValue::new).map_err(pyerr_to_de_error)
+}
+
+fn cached_map_key(py: Python, key: &str) -> Py<PyString> {
+    PY_MAP_KEY_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(existing) = cache.get(key) {
+            return existing.clone_ref(py);
+        }
+        if cache.len() >= PY_MAP_KEY_CACHE_MAX {
+            cache.clear();
+        }
+        let py_key = PyString::new(py, key).unbind();
+        cache.insert(key.to_owned(), py_key.clone_ref(py));
+        py_key
+    })
 }
 
 // Mode constants matching original maxminddb module
