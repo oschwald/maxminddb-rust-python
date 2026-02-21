@@ -528,13 +528,13 @@ impl Reader {
         // Parse IP address - support string or ipaddress objects
         let parsed_ip = parse_ip_address(ip_address)?;
 
-        if self.ip_version == 4 && matches!(parsed_ip.addr, IpAddr::V6(_)) {
-            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip.addr)));
+        if self.ip_version == 4 && matches!(parsed_ip, IpAddr::V6(_)) {
+            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip)));
         }
 
         let reader = self.get_reader()?;
 
-        let lookup_result = reader.lookup(parsed_ip.addr);
+        let lookup_result = reader.lookup(parsed_ip);
 
         match lookup_result {
             Ok(Some(data)) => Ok(data.into_py()),
@@ -573,8 +573,8 @@ impl Reader {
         // Parse IP address
         let parsed_ip = parse_ip_address(ip_address)?;
 
-        if self.ip_version == 4 && matches!(parsed_ip.addr, IpAddr::V6(_)) {
-            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip.addr)));
+        if self.ip_version == 4 && matches!(parsed_ip, IpAddr::V6(_)) {
+            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip)));
         }
 
         // Parse path (cache tuple paths, which are immutable and commonly reused)
@@ -587,7 +587,7 @@ impl Reader {
         // But since we are passing ownership of `path` (Vec<String>) into the closure,
         // and constructing the Vec<&str> inside, it should work.
 
-        let result = reader.lookup_path(parsed_ip.addr, &owned_path);
+        let result = reader.lookup_path(parsed_ip, &owned_path);
 
         match result {
             Ok(Some(data)) => Ok(data.into_py()),
@@ -627,13 +627,13 @@ impl Reader {
         // Parse IP address - support string or ipaddress objects
         let parsed_ip = parse_ip_address(ip_address)?;
 
-        if self.ip_version == 4 && matches!(parsed_ip.addr, IpAddr::V6(_)) {
-            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip.addr)));
+        if self.ip_version == 4 && matches!(parsed_ip, IpAddr::V6(_)) {
+            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip)));
         }
 
         let reader = self.get_reader()?;
 
-        let result = reader.lookup_prefix(parsed_ip.addr);
+        let result = reader.lookup_prefix(parsed_ip);
 
         match result {
             Ok((Some(data), prefix_len)) => {
@@ -1042,13 +1042,9 @@ fn parse_path(path: &Bound<'_, PyAny>) -> PyResult<Vec<OwnedPathElement>> {
     Ok(owned_path)
 }
 
-struct ParsedIp {
-    addr: IpAddr,
-}
-
 /// Helper function to parse IP address from string or ipaddress objects
 #[inline(always)]
-fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<ParsedIp> {
+fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<IpAddr> {
     // Fast path: Try string first (most common case)
     if let Ok(py_str) = ip_address.cast::<PyString>() {
         let s = py_str.to_str()?;
@@ -1058,14 +1054,14 @@ fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<ParsedIp> {
                 s
             ))
         })?;
-        return Ok(ParsedIp { addr });
+        return Ok(addr);
     }
 
     // Slow path: Check if it's an ipaddress.IPv4Address or IPv6Address
     let type_name = ip_address.get_type().name()?;
     if type_name == "IPv4Address" || type_name == "IPv6Address" {
         let addr = ip_address.extract::<IpAddr>()?;
-        return Ok(ParsedIp { addr });
+        return Ok(addr);
     }
 
     Err(PyTypeError::new_err(
