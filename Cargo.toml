@@ -1,6 +1,6 @@
 [package]
 name = "maxminddb-rust"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 authors = ["Gregory Oschwald <oschwald@gmail.com>"]
 description = "Rust-based Python binding for MaxMind DB - high-performance alternative to maxminddb"
@@ -13,9 +13,10 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ipnetwork = "0.21"
-maxminddb = { version = "0.27.0", features = ["simdutf8"] }
+maxminddb = { version = "0.27.3", features = ["simdutf8"] }
 memmap2 = "0.9"
-pyo3 = { version = "0.27.2", features = ["extension-module", "generate-import-lib"] }
+pyo3 = { version = "0.28.2", features = ["extension-module", "generate-import-lib"] }
+rustc-hash = "2"
 serde = "1.0"
 
 [features]

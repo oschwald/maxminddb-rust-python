@@ -9,12 +9,13 @@ use pyo3::{
         PyFileNotFoundError, PyIOError, PyOSError, PyRuntimeError, PyTypeError, PyValueError,
     },
     prelude::*,
-    types::{PyBytes, PyDict, PyList, PyModule, PyString},
+    types::{PyBytes, PyDict, PyList, PyModule, PyString, PyTuple},
 };
+use rustc_hash::FxHashMap;
 use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 use std::{
-    borrow::Cow,
-    collections::BTreeMap,
+    cell::RefCell,
+    collections::{BTreeMap, VecDeque},
     fmt,
     fs::File,
     io::Read as IoRead,
@@ -24,9 +25,16 @@ use std::{
     str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, RwLock,
+        Arc, Mutex, RwLock,
     },
 };
+
+thread_local! {
+    static PY_MAP_KEY_CACHE: RefCell<FxHashMap<String, Py<PyString>>> =
+        RefCell::new(FxHashMap::default());
+}
+
+const PY_MAP_KEY_CACHE_MAX: usize = 256;
 
 // Define InvalidDatabaseError exception (subclass of RuntimeError)
 pyo3::create_exception!(
@@ -212,10 +220,9 @@ impl<'de, 'py> Visitor<'de> for PyValueVisitor<'py> {
         A: MapAccess<'de>,
     {
         let dict = PyDict::new(self.py);
-        while let Some(key) = map.next_key::<Cow<'de, str>>()? {
+        while let Some(key) = map.next_key::<&'de str>()? {
             let value = map.next_value_seed(PyValueSeed::new(self.py))?;
-            dict.set_item(key.as_ref(), value.into_py())
-                .map_err(pyerr_to_de_error)?;
+            set_cached_map_item(self.py, &dict, key, value.into_py()).map_err(pyerr_to_de_error)?;
         }
         Ok(PyDecodedValue::new(dict.into_any().unbind()))
     }
@@ -227,6 +234,27 @@ fn pyerr_to_de_error<E: de::Error>(err: PyErr) -> E {
 
 fn bound_to_value<E: de::Error>(result: PyResult<Py<PyAny>>) -> Result<PyDecodedValue, E> {
     result.map(PyDecodedValue::new).map_err(pyerr_to_de_error)
+}
+
+fn set_cached_map_item(
+    py: Python,
+    dict: &Bound<'_, PyDict>,
+    key: &str,
+    value: Py<PyAny>,
+) -> PyResult<()> {
+    PY_MAP_KEY_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(existing) = cache.get(key) {
+            return dict.set_item(existing.bind(py), value);
+        }
+        if cache.len() >= PY_MAP_KEY_CACHE_MAX {
+            return dict.set_item(PyString::new(py, key), value);
+        }
+        let py_key = PyString::new(py, key).unbind();
+        let result = dict.set_item(py_key.bind(py), value);
+        cache.insert(key.to_owned(), py_key);
+        result
+    })
 }
 
 // Mode constants matching original maxminddb module
@@ -241,11 +269,45 @@ const MODE_FD: i32 = 16;
 const ERR_CLOSED_DB: &str = "Attempt to read from a closed MaxMind DB.";
 const ERR_BAD_DATA: &str =
     "The MaxMind DB file's data section contains bad data (unknown data type or corrupt data)";
+const ERR_UNSUPPORTED_FILE_MODE: &str =
+    "MODE_FILE not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY";
+const ERR_UNSUPPORTED_FD_MODE: &str =
+    "MODE_FD not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY";
+const ERR_BAD_DATABASE_ARG: &str = "database must be a string, PathLike, or file descriptor";
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum OpenMode {
+    MmapExt,
+    Mmap,
+    File,
+    Memory,
+    Fd,
+}
+
+impl TryFrom<i32> for OpenMode {
+    type Error = PyErr;
+
+    fn try_from(mode: i32) -> Result<Self, Self::Error> {
+        match mode {
+            MODE_AUTO => Ok(Self::Mmap),
+            MODE_MMAP_EXT => Ok(Self::MmapExt),
+            MODE_MMAP => Ok(Self::Mmap),
+            MODE_FILE => Ok(Self::File),
+            MODE_MEMORY => Ok(Self::Memory),
+            MODE_FD => Ok(Self::Fd),
+            _ => Err(PyValueError::new_err(format!(
+                "Unsupported open mode ({mode})"
+            ))),
+        }
+    }
+}
 
 enum OwnedPathElement {
     Key(String),
     Index(usize),
 }
+
+type CachedPath = (Py<PyTuple>, Arc<Vec<OwnedPathElement>>);
 
 /// Enum to handle different reader source types
 enum ReaderSource {
@@ -411,6 +473,23 @@ impl Metadata {
     }
 }
 
+impl Metadata {
+    #[inline]
+    fn from_maxmind(meta: &maxminddb_crate::Metadata) -> Self {
+        Self {
+            binary_format_major_version: meta.binary_format_major_version,
+            binary_format_minor_version: meta.binary_format_minor_version,
+            build_epoch: meta.build_epoch,
+            database_type: meta.database_type.clone(),
+            description_dict: meta.description.clone(),
+            ip_version: meta.ip_version,
+            languages_list: meta.languages.clone(),
+            node_count: meta.node_count,
+            record_size: meta.record_size,
+        }
+    }
+}
+
 /// A Python wrapper around the MaxMind DB reader.
 /// Supports both memory-mapped files (MODE_MMAP) and in-memory (MODE_MEMORY) modes.
 #[pyclass(module = "maxminddb_rust.extension")]
@@ -418,6 +497,7 @@ struct Reader {
     reader: Arc<RwLock<Option<Arc<ReaderSource>>>>,
     closed: Arc<AtomicBool>,
     ip_version: u16,
+    path_cache: Mutex<VecDeque<CachedPath>>,
 }
 
 #[pymethods]
@@ -425,42 +505,9 @@ impl Reader {
     #[new]
     #[pyo3(signature = (database, mode=MODE_AUTO))]
     fn new(database: &Bound<'_, PyAny>, mode: i32) -> PyResult<Self> {
-        // Extract path from database parameter
-        let path = if let Ok(s) = database.extract::<String>() {
-            s
-        } else {
-            // Try to get __fspath__ for PathLike objects
-            match database.call_method0("__fspath__") {
-                Ok(fspath) => fspath.extract::<String>()?,
-                Err(_) => {
-                    return Err(PyValueError::new_err(
-                        "database must be a string, PathLike, or file descriptor",
-                    ));
-                }
-            }
-        };
-
-        // Determine which mode to use
-        let actual_mode = if mode == MODE_AUTO {
-            MODE_MMAP // Default to mmap for best performance
-        } else {
-            mode
-        };
-
-        // Validate and open database with appropriate mode
-        match actual_mode {
-            MODE_MMAP | MODE_MMAP_EXT => open_database_mmap(&path),
-            MODE_MEMORY => open_database_memory(&path),
-            MODE_FILE => Err(PyValueError::new_err(
-                "MODE_FILE not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY",
-            )),
-            MODE_FD => Err(PyValueError::new_err(
-                "MODE_FD not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY",
-            )),
-            _ => Err(PyValueError::new_err(format!(
-                "Unsupported open mode ({actual_mode})"
-            ))),
-        }
+        let path = Self::extract_database_path(database)?;
+        let open_mode = Self::resolve_open_mode(mode)?;
+        Self::open_reader_from_mode(&path, open_mode)
     }
 
     /// Check if the database has been closed.
@@ -500,22 +547,16 @@ impl Reader {
     ///     {'city': {'names': {'en': 'Mountain View'}}, ...}
     #[inline]
     fn get(&self, py: Python, ip_address: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        // Quick check if database is closed
-        if self.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err(ERR_CLOSED_DB));
-        }
-
         // Parse IP address - support string or ipaddress objects
         let parsed_ip = parse_ip_address(ip_address)?;
 
-        if self.ip_version == 4 && matches!(parsed_ip.addr, IpAddr::V6(_)) {
-            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip.addr)));
+        if self.ip_version == 4 && matches!(parsed_ip, IpAddr::V6(_)) {
+            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip)));
         }
 
         let reader = self.get_reader()?;
 
-        // Release GIL during lookup for better concurrency
-        let lookup_result = py.detach(|| reader.lookup(parsed_ip.addr));
+        let lookup_result = reader.lookup(parsed_ip);
 
         match lookup_result {
             Ok(Some(data)) => Ok(data.into_py()),
@@ -551,29 +592,19 @@ impl Reader {
         ip_address: &Bound<'_, PyAny>,
         path: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
-        // Quick check if database is closed
-        if self.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err(ERR_CLOSED_DB));
-        }
-
         // Parse IP address
         let parsed_ip = parse_ip_address(ip_address)?;
 
-        if self.ip_version == 4 && matches!(parsed_ip.addr, IpAddr::V6(_)) {
-            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip.addr)));
+        if self.ip_version == 4 && matches!(parsed_ip, IpAddr::V6(_)) {
+            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip)));
         }
 
-        // Parse path
-        let owned_path = parse_path(path)?;
+        // Parse path (cache tuple paths, which are immutable and commonly reused)
+        let owned_path = self.get_or_parse_path(py, path)?;
 
         let reader = self.get_reader()?;
 
-        // We need to keep the Strings alive while we use them as &str
-        // This is a bit tricky because we're crossing the thread boundary with py.detach
-        // But since we are passing ownership of `path` (Vec<String>) into the closure,
-        // and constructing the Vec<&str> inside, it should work.
-
-        let result = py.detach(move || reader.lookup_path(parsed_ip.addr, &owned_path));
+        let result = reader.lookup_path(parsed_ip, &owned_path);
 
         match result {
             Ok(Some(data)) => Ok(data.into_py()),
@@ -610,22 +641,16 @@ impl Reader {
         py: Python,
         ip_address: &Bound<'_, PyAny>,
     ) -> PyResult<(Py<PyAny>, usize)> {
-        // Quick check if database is closed
-        if self.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err(ERR_CLOSED_DB));
-        }
-
         // Parse IP address - support string or ipaddress objects
         let parsed_ip = parse_ip_address(ip_address)?;
 
-        if self.ip_version == 4 && matches!(parsed_ip.addr, IpAddr::V6(_)) {
-            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip.addr)));
+        if self.ip_version == 4 && matches!(parsed_ip, IpAddr::V6(_)) {
+            return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip)));
         }
 
         let reader = self.get_reader()?;
 
-        // Release GIL during lookup
-        let result = py.detach(|| reader.lookup_prefix(parsed_ip.addr));
+        let result = reader.lookup_prefix(parsed_ip);
 
         match result {
             Ok((Some(data), prefix_len)) => {
@@ -644,7 +669,8 @@ impl Reader {
     ///
     /// This is an extension method not available in the original maxminddb module.
     /// It provides better performance than calling get() repeatedly by reducing
-    /// call overhead and releasing the GIL during the entire batch operation.
+    /// call overhead. This method does not release the Python GIL while
+    /// processing the batch.
     ///
     /// Args:
     ///     ips: A list of IP address strings to look up (e.g., ['1.2.3.4', '8.8.8.8']).
@@ -664,13 +690,16 @@ impl Reader {
     ///     >>> results = reader.get_many(ips)
     ///     >>> len(results)
     ///     3
+    ///
+    /// Notes:
+    ///     This method keeps the GIL for the duration of the batch. For better
+    ///     concurrency with other Python threads, consider smaller batch sizes,
+    ///     per-item lookups, or running lookups in a separate worker thread.
     fn get_many(&self, py: Python, ips: Vec<String>) -> PyResult<Vec<Py<PyAny>>> {
-        // Quick check if database is closed
-        if self.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err(ERR_CLOSED_DB));
-        }
-
-        let mut parsed_ips = Vec::with_capacity(ips.len());
+        // Keep work under the GIL for lower per-item overhead; callers wanting
+        // concurrent Python execution should prefer smaller batches or threading.
+        let reader = self.get_reader()?;
+        let mut objects = Vec::with_capacity(ips.len());
         for ip in &ips {
             let ip_addr: IpAddr = ip
                 .parse()
@@ -680,17 +709,7 @@ impl Reader {
                 return Err(PyValueError::new_err(ipv6_in_ipv4_error(&ip_addr)));
             }
 
-            parsed_ips.push(ip_addr);
-        }
-
-        let reader = self.get_reader()?;
-
-        // Release GIL during all lookups
-        let results: Vec<Result<Option<PyDecodedValue>, MaxMindDbError>> =
-            py.detach(|| parsed_ips.iter().map(|ip| reader.lookup(*ip)).collect());
-
-        let mut objects = Vec::with_capacity(results.len());
-        for result in results {
+            let result = reader.lookup(ip_addr);
             match result {
                 Ok(Some(data)) => objects.push(data.into_py()),
                 Ok(None) => objects.push(py.None()),
@@ -742,17 +761,7 @@ impl Reader {
 
         let meta = reader.metadata();
 
-        Ok(Metadata {
-            binary_format_major_version: meta.binary_format_major_version,
-            binary_format_minor_version: meta.binary_format_minor_version,
-            build_epoch: meta.build_epoch,
-            database_type: meta.database_type.clone(),
-            description_dict: meta.description.clone(),
-            ip_version: meta.ip_version,
-            languages_list: meta.languages.clone(),
-            node_count: meta.node_count,
-            record_size: meta.record_size,
-        })
+        Ok(Metadata::from_maxmind(meta))
     }
 
     /// Close the database and release resources.
@@ -838,6 +847,65 @@ impl Reader {
 
 // Internal helper methods for Reader
 impl Reader {
+    fn extract_database_path(database: &Bound<'_, PyAny>) -> PyResult<String> {
+        if let Ok(s) = database.extract::<String>() {
+            return Ok(s);
+        }
+
+        match database.call_method0("__fspath__") {
+            Ok(fspath) => fspath.extract::<String>(),
+            Err(_) => Err(PyValueError::new_err(ERR_BAD_DATABASE_ARG)),
+        }
+    }
+
+    fn resolve_open_mode(mode: i32) -> PyResult<OpenMode> {
+        OpenMode::try_from(mode)
+    }
+
+    fn open_reader_from_mode(path: &str, mode: OpenMode) -> PyResult<Self> {
+        match mode {
+            OpenMode::Mmap | OpenMode::MmapExt => open_database_mmap(path),
+            OpenMode::Memory => open_database_memory(path),
+            OpenMode::File => Err(PyValueError::new_err(ERR_UNSUPPORTED_FILE_MODE)),
+            OpenMode::Fd => Err(PyValueError::new_err(ERR_UNSUPPORTED_FD_MODE)),
+        }
+    }
+
+    fn get_or_parse_path(
+        &self,
+        py: Python,
+        path: &Bound<'_, PyAny>,
+    ) -> PyResult<Arc<Vec<OwnedPathElement>>> {
+        const PATH_CACHE_MAX_ENTRIES: usize = 64;
+
+        let Ok(path_tuple) = path.cast::<PyTuple>() else {
+            return Ok(Arc::new(parse_path(path)?));
+        };
+        let path_ptr = path_tuple.as_ptr();
+
+        if let Ok(cache) = self.path_cache.lock() {
+            for (cached_tuple, cached_path) in cache.iter() {
+                if cached_tuple.bind(py).as_ptr() == path_ptr {
+                    return Ok(Arc::clone(cached_path));
+                }
+            }
+        }
+
+        let parsed = Arc::new(parse_path(path)?);
+        if let Ok(mut cache) = self.path_cache.lock() {
+            for (cached_tuple, cached_path) in cache.iter() {
+                if cached_tuple.bind(py).as_ptr() == path_ptr {
+                    return Ok(Arc::clone(cached_path));
+                }
+            }
+            if cache.len() >= PATH_CACHE_MAX_ENTRIES {
+                cache.pop_front();
+            }
+            cache.push_back((path_tuple.clone().unbind(), Arc::clone(&parsed)));
+        }
+        Ok(parsed)
+    }
+
     /// Get the reader from the internal mutex, returning an error if closed
     #[inline]
     fn get_reader(&self) -> PyResult<Arc<ReaderSource>> {
@@ -849,7 +917,11 @@ impl Reader {
     }
 }
 
-/// Iterator for Reader that yields (network, record) tuples
+/// Iterator for Reader that yields `(network, record)` tuples.
+///
+/// Safety:
+/// `_reader_guard` must remain declared before `iter`. `iter` is produced via
+/// `extend_within_lifetime`, which relies on `_reader_guard` being dropped last.
 #[pyclass(module = "maxminddb_rust.extension")]
 struct ReaderIterator {
     _reader_guard: Arc<ReaderSource>,
@@ -859,11 +931,10 @@ struct ReaderIterator {
 }
 
 impl ReaderIterator {
-    fn new(py: Python, reader: Arc<ReaderSource>) -> PyResult<Self> {
-        let ip_version = reader.metadata().ip_version;
-
-        // For IPv4 databases, iterate over IPv4 range only
-        // For IPv6 databases, iterate over IPv6 range only (includes IPv4-mapped addresses)
+    #[inline]
+    fn root_network_for_ip_version(
+        ip_version: u16,
+    ) -> PyResult<(ipnetwork::IpNetwork, &'static str)> {
         let (network_str, network_type) = if ip_version == 4 {
             ("0.0.0.0/0", "IPv4")
         } else {
@@ -876,6 +947,29 @@ impl ReaderIterator {
                 network_type, e
             ))
         })?;
+        Ok((network, network_type))
+    }
+
+    #[inline]
+    fn network_to_python(&self, py: Python, ip_net: ipnetwork::IpNetwork) -> PyResult<Py<PyAny>> {
+        let (class, addr_int, prefix_len) = match ip_net {
+            ipnetwork::IpNetwork::V4(v4) => (
+                self.ipv4_network_cls.bind(py),
+                u32::from(v4.ip()) as u128,
+                v4.prefix(),
+            ),
+            ipnetwork::IpNetwork::V6(v6) => (
+                self.ipv6_network_cls.bind(py),
+                u128::from(v6.ip()),
+                v6.prefix(),
+            ),
+        };
+        Ok(class.call1(((addr_int, prefix_len),))?.unbind())
+    }
+
+    fn new(py: Python, reader: Arc<ReaderSource>) -> PyResult<Self> {
+        let ip_version = reader.metadata().ip_version;
+        let (network, network_type) = Self::root_network_for_ip_version(ip_version)?;
 
         let iter = ReaderWithin::new(&reader, network).map_err(|e| {
             InvalidDatabaseError::new_err(format!("Failed to iterate {}: {}", network_type, e))
@@ -906,18 +1000,12 @@ impl ReaderIterator {
                 .map_err(|e| InvalidDatabaseError::new_err(format!("Iteration error: {}", e)))?,
             None => return Ok(None),
         };
-
-        // Convert IpNetwork to Python ipaddress.IPv4Network or IPv6Network
-        let (class, network_str) = match next_item.ip_net {
-            ipnetwork::IpNetwork::V4(v4) => (self.ipv4_network_cls.bind(py), v4.to_string()),
-            ipnetwork::IpNetwork::V6(v6) => (self.ipv6_network_cls.bind(py), v6.to_string()),
-        };
-        let network_obj = class.call1((network_str,))?;
+        let network_obj = self.network_to_python(py, next_item.ip_net)?;
 
         // Record is already materialized as a Python object
         let data_obj = next_item.data.into_py();
 
-        Ok(Some((network_obj.unbind(), data_obj)))
+        Ok(Some((network_obj, data_obj)))
     }
 }
 
@@ -932,6 +1020,40 @@ struct WithinResult {
     data: PyDecodedValue,
 }
 
+#[inline]
+fn process_within_lookup<S: AsRef<[u8]>>(
+    lookup_result: maxminddb_crate::LookupResult<'_, S>,
+) -> Result<WithinResult, MaxMindDbError> {
+    let network = lookup_result.network()?;
+    let ip_net = ipnetwork::IpNetwork::new(network.network(), network.prefix()).map_err(|e| {
+        MaxMindDbError::InvalidDatabase {
+            message: format!("Invalid network from database: {}", e),
+            offset: None,
+        }
+    })?;
+    let data: Option<PyDecodedValue> = lookup_result.decode()?;
+    let data = data.ok_or_else(|| MaxMindDbError::InvalidDatabase {
+        message: "No data in database record".to_string(),
+        offset: None,
+    })?;
+    Ok(WithinResult { ip_net, data })
+}
+
+#[inline]
+fn next_within<S: AsRef<[u8]>>(
+    iter: &mut Within<'static, S>,
+) -> Option<Result<WithinResult, MaxMindDbError>> {
+    let result = iter.next()?;
+    Some(result.and_then(process_within_lookup))
+}
+
+#[inline]
+unsafe fn extend_within_lifetime<S: AsRef<[u8]>>(iter: Within<'_, S>) -> Within<'static, S> {
+    // SAFETY: The caller must ensure the reader backing `iter` outlives returned iterator.
+    // `ReaderIterator` stores an Arc guard that guarantees this.
+    unsafe { transmute::<Within<'_, S>, Within<'static, S>>(iter) }
+}
+
 impl ReaderWithin {
     fn new(
         reader: &Arc<ReaderSource>,
@@ -941,90 +1063,54 @@ impl ReaderWithin {
         match reader.as_ref() {
             ReaderSource::Mmap(inner) => {
                 let iter = inner.within(network, options)?;
-                // SAFETY: the iterator holds a reference into `inner`. We store an Arc guard
-                // alongside it so the reader outlives the transmuted iterator.
-                Ok(Self::Mmap(unsafe {
-                    transmute::<Within<'_, Mmap>, Within<'_, Mmap>>(iter)
-                }))
+                Ok(Self::Mmap(unsafe { extend_within_lifetime(iter) }))
             }
             ReaderSource::Memory(inner) => {
                 let iter = inner.within(network, options)?;
-                // SAFETY: same as above, the Arc guard in `ReaderIterator` keeps the reader alive.
-                Ok(Self::Memory(unsafe {
-                    transmute::<Within<'_, Vec<u8>>, Within<'_, Vec<u8>>>(iter)
-                }))
+                Ok(Self::Memory(unsafe { extend_within_lifetime(iter) }))
             }
         }
     }
 
     fn next(&mut self) -> Option<Result<WithinResult, maxminddb_crate::MaxMindDbError>> {
-        fn process_lookup<S: AsRef<[u8]>>(
-            lookup_result: maxminddb_crate::LookupResult<'_, S>,
-        ) -> Result<WithinResult, MaxMindDbError> {
-            let network = lookup_result.network()?;
-            let ip_net =
-                ipnetwork::IpNetwork::new(network.network(), network.prefix()).map_err(|e| {
-                    MaxMindDbError::InvalidDatabase {
-                        message: format!("Invalid network from database: {}", e),
-                        offset: None,
-                    }
-                })?;
-            let data: Option<PyDecodedValue> = lookup_result.decode()?;
-            let data = data.ok_or_else(|| MaxMindDbError::InvalidDatabase {
-                message: "No data in database record".to_string(),
-                offset: None,
-            })?;
-            Ok(WithinResult { ip_net, data })
-        }
-
         match self {
-            ReaderWithin::Mmap(iter) => {
-                let result = iter.next()?;
-                Some(result.and_then(process_lookup))
-            }
-            ReaderWithin::Memory(iter) => {
-                let result = iter.next()?;
-                Some(result.and_then(process_lookup))
-            }
+            ReaderWithin::Mmap(iter) => next_within(iter),
+            ReaderWithin::Memory(iter) => next_within(iter),
         }
     }
 }
 
 fn parse_path(path: &Bound<'_, PyAny>) -> PyResult<Vec<OwnedPathElement>> {
-    let mut owned_path = Vec::new();
-    if path.is_instance_of::<PyString>() {
-        return Err(PyTypeError::new_err(
-            "Path must be a sequence (list or tuple)",
-        ));
-    }
-    if let Ok(iterator) = path.try_iter() {
-        for item in iterator {
-            let item = item?;
-            if let Ok(s) = item.extract::<String>() {
-                owned_path.push(OwnedPathElement::Key(s));
-            } else if let Ok(i) = item.extract::<usize>() {
-                owned_path.push(OwnedPathElement::Index(i));
-            } else {
-                return Err(PyTypeError::new_err(
-                    "Path elements must be strings or integers",
-                ));
-            }
-        }
-    } else {
-        return Err(PyTypeError::new_err(
-            "Path must be a sequence (list or tuple)",
-        ));
-    }
-    Ok(owned_path)
-}
+    const ERR_PATH_SEQUENCE: &str = "Path must be a sequence (list or tuple)";
+    const ERR_PATH_ELEMENT: &str = "Path elements must be strings or integers";
 
-struct ParsedIp {
-    addr: IpAddr,
+    if path.is_instance_of::<PyString>() {
+        return Err(PyTypeError::new_err(ERR_PATH_SEQUENCE));
+    }
+
+    let iterator = path
+        .try_iter()
+        .map_err(|_| PyTypeError::new_err(ERR_PATH_SEQUENCE))?;
+    let mut owned_path = Vec::new();
+    for item in iterator {
+        let item = item?;
+        if let Ok(s) = item.extract::<String>() {
+            owned_path.push(OwnedPathElement::Key(s));
+            continue;
+        }
+        if let Ok(i) = item.extract::<usize>() {
+            owned_path.push(OwnedPathElement::Index(i));
+            continue;
+        }
+        return Err(PyTypeError::new_err(ERR_PATH_ELEMENT));
+    }
+
+    Ok(owned_path)
 }
 
 /// Helper function to parse IP address from string or ipaddress objects
 #[inline(always)]
-fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<ParsedIp> {
+fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<IpAddr> {
     // Fast path: Try string first (most common case)
     if let Ok(py_str) = ip_address.cast::<PyString>() {
         let s = py_str.to_str()?;
@@ -1034,14 +1120,14 @@ fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<ParsedIp> {
                 s
             ))
         })?;
-        return Ok(ParsedIp { addr });
+        return Ok(addr);
     }
 
     // Slow path: Check if it's an ipaddress.IPv4Address or IPv6Address
     let type_name = ip_address.get_type().name()?;
     if type_name == "IPv4Address" || type_name == "IPv6Address" {
         let addr = ip_address.extract::<IpAddr>()?;
-        return Ok(ParsedIp { addr });
+        return Ok(addr);
     }
 
     Err(PyTypeError::new_err(
@@ -1073,30 +1159,40 @@ fn create_reader(source: ReaderSource) -> Reader {
         reader: Arc::new(RwLock::new(Some(Arc::new(source)))),
         closed: Arc::new(AtomicBool::new(false)),
         ip_version,
+        path_cache: Mutex::new(VecDeque::new()),
     }
+}
+
+#[inline]
+fn reader_from_source<S: AsRef<[u8]>>(path: &str, source: S) -> PyResult<MaxMindReader<S>> {
+    MaxMindReader::from_source(source).map_err(|_| {
+        InvalidDatabaseError::new_err(format!(
+            "Error opening database file ({}). Is this a valid MaxMind DB file?",
+            path
+        ))
+    })
+}
+
+#[inline]
+fn load_reader<F, S>(path: &str, load_source: F) -> PyResult<MaxMindReader<S>>
+where
+    F: FnOnce(&str) -> PyResult<S> + Send,
+    S: AsRef<[u8]> + Send,
+{
+    Python::attach(|py| {
+        py.detach(|| load_source(path).and_then(|source| reader_from_source(path, source)))
+    })
 }
 
 /// Open a MaxMind DB using memory-mapped files (MODE_MMAP)
 fn open_database_mmap(path: &str) -> PyResult<Reader> {
-    // Release GIL during file I/O operation
-    let reader = Python::attach(|py| {
-        py.detach(|| {
-            let file = open_file(path)?;
-
-            // Safety: The mmap is read-only and the file won't be modified
-            let mmap = unsafe {
-                Mmap::map(&file).map_err(|e| {
-                    PyIOError::new_err(format!("Failed to memory-map database: {e}"))
-                })?
-            };
-
-            MaxMindReader::from_source(mmap).map_err(|_| {
-                InvalidDatabaseError::new_err(format!(
-                    "Error opening database file ({}). Is this a valid MaxMind DB file?",
-                    path
-                ))
-            })
-        })
+    let reader = load_reader(path, |path| {
+        let file = open_file(path)?;
+        // Safety: The mmap is read-only and the file won't be modified.
+        unsafe {
+            Mmap::map(&file)
+                .map_err(|e| PyIOError::new_err(format!("Failed to memory-map database: {e}")))
+        }
     })?;
 
     Ok(create_reader(ReaderSource::Mmap(reader)))
@@ -1104,22 +1200,12 @@ fn open_database_mmap(path: &str) -> PyResult<Reader> {
 
 /// Open a MaxMind DB by loading entire file into memory (MODE_MEMORY)
 fn open_database_memory(path: &str) -> PyResult<Reader> {
-    // Release GIL during file I/O operation
-    let reader = Python::attach(|py| {
-        py.detach(|| {
-            let mut file = open_file(path)?;
-
-            let mut buffer = Vec::new();
-            file.read_to_end(&mut buffer)
-                .map_err(|e| PyIOError::new_err(format!("Failed to read database file: {e}")))?;
-
-            MaxMindReader::from_source(buffer).map_err(|_| {
-                InvalidDatabaseError::new_err(format!(
-                    "Error opening database file ({}). Is this a valid MaxMind DB file?",
-                    path
-                ))
-            })
-        })
+    let reader = load_reader(path, |path| {
+        let mut file = open_file(path)?;
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer)
+            .map_err(|e| PyIOError::new_err(format!("Failed to read database file: {e}")))?;
+        Ok(buffer)
     })?;
 
     Ok(create_reader(ReaderSource::Memory(reader)))

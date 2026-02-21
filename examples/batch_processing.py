@@ -191,7 +191,7 @@ def batch_with_error_handling():
             print(f"   Successfully looked up {len(results)} IPs")
         except ValueError as e:
             print(f"   Error during batch lookup: {e}")
-            print("   Note: get_many() validates all IPs before processing")
+            print("   Note: get_many() fails fast on the first invalid IP")
 
 
 def chunked_batch_processing():
