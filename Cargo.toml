@@ -13,9 +13,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ipnetwork = "0.21"
-maxminddb = { version = "0.27.0", features = ["simdutf8"] }
+maxminddb = { version = "0.27.3", features = ["simdutf8"] }
 memmap2 = "0.9"
-pyo3 = { version = "0.27.2", features = ["extension-module", "generate-import-lib"] }
+pyo3 = { version = "0.28.2", features = ["extension-module", "generate-import-lib"] }
 serde = "1.0"
 
 [features]
