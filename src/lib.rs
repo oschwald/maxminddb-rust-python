@@ -671,7 +671,8 @@ impl Reader {
             return Err(PyValueError::new_err(ERR_CLOSED_DB));
         }
 
-        let mut parsed_ips = Vec::with_capacity(ips.len());
+        let reader = self.get_reader()?;
+        let mut objects = Vec::with_capacity(ips.len());
         for ip in &ips {
             let ip_addr: IpAddr = ip
                 .parse()
@@ -681,17 +682,7 @@ impl Reader {
                 return Err(PyValueError::new_err(ipv6_in_ipv4_error(&ip_addr)));
             }
 
-            parsed_ips.push(ip_addr);
-        }
-
-        let reader = self.get_reader()?;
-
-        // Release GIL during all lookups
-        let results: Vec<Result<Option<PyDecodedValue>, MaxMindDbError>> =
-            py.detach(|| parsed_ips.iter().map(|ip| reader.lookup(*ip)).collect());
-
-        let mut objects = Vec::with_capacity(results.len());
-        for result in results {
+            let result = reader.lookup(ip_addr);
             match result {
                 Ok(Some(data)) => objects.push(data.into_py()),
                 Ok(None) => objects.push(py.None()),
