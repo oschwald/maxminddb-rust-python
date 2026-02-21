@@ -473,6 +473,23 @@ impl Metadata {
     }
 }
 
+impl Metadata {
+    #[inline]
+    fn from_maxmind(meta: &maxminddb_crate::Metadata) -> Self {
+        Self {
+            binary_format_major_version: meta.binary_format_major_version,
+            binary_format_minor_version: meta.binary_format_minor_version,
+            build_epoch: meta.build_epoch,
+            database_type: meta.database_type.clone(),
+            description_dict: meta.description.clone(),
+            ip_version: meta.ip_version,
+            languages_list: meta.languages.clone(),
+            node_count: meta.node_count,
+            record_size: meta.record_size,
+        }
+    }
+}
+
 /// A Python wrapper around the MaxMind DB reader.
 /// Supports both memory-mapped files (MODE_MMAP) and in-memory (MODE_MEMORY) modes.
 #[pyclass(module = "maxminddb_rust.extension")]
@@ -744,17 +761,7 @@ impl Reader {
 
         let meta = reader.metadata();
 
-        Ok(Metadata {
-            binary_format_major_version: meta.binary_format_major_version,
-            binary_format_minor_version: meta.binary_format_minor_version,
-            build_epoch: meta.build_epoch,
-            database_type: meta.database_type.clone(),
-            description_dict: meta.description.clone(),
-            ip_version: meta.ip_version,
-            languages_list: meta.languages.clone(),
-            node_count: meta.node_count,
-            record_size: meta.record_size,
-        })
+        Ok(Metadata::from_maxmind(meta))
     }
 
     /// Close the database and release resources.
