@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-02-21
+
+### Breaking
+
+- `Reader.__iter__` now yields `(ipaddress.IPv4Network | ipaddress.IPv6Network, dict)`
+  tuples instead of `(str, dict)`. Update callers that expect string networks
+  to handle network objects directly, or convert with `str(network)`.
+
+### Changed
+
+- Consolidated benchmark scripts under `benchmarks/` and removed
+  `examples/benchmark.py`.
+- Updated benchmark documentation in `README.md` to match the consolidated
+  benchmark layout.
+- Simplified internal IP parsing and iterator code paths to reduce duplication
+  and improve maintainability.
+- Refactored database opening and reader initialization flow:
+  - centralized open-mode parsing/validation
+  - unified mmap vs memory reader loading
+  - centralized metadata conversion
+- Dependency updates:
+  - upgraded `PyO3` from 0.27 to 0.28
+  - upgraded `maxminddb` from 0.27.1 to 0.27.3
+  - added `rustc-hash`
+
+### Performance
+
+- Improved `get()` and `get_with_prefix_len()` throughput by optimizing decode
+  map-key caching:
+  - switched to a faster key cache strategy for Python map keys
+  - reduced key insertion overhead in the hot decode path
+- Simplified lookup-path internals in performance-neutral ways to reduce
+  complexity without regressions.
+
 ## [0.3.0] - 2025-12-18
 
 ### Added
@@ -101,5 +135,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python 3.8+
 - CPython implementation
 
-[Unreleased]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/oschwald/maxminddb-rust-python/releases/tag/v0.1.0
