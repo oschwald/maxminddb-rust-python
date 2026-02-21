@@ -29,7 +29,7 @@ use std::{
 };
 
 thread_local! {
-    static PY_MAP_KEY_CACHE: RefCell<BTreeMap<String, Py<PyString>>> = const { RefCell::new(BTreeMap::new()) };
+    static PY_MAP_KEY_CACHE: RefCell<Vec<(String, Py<PyString>)>> = const { RefCell::new(Vec::new()) };
 }
 
 const PY_MAP_KEY_CACHE_MAX: usize = 256;
@@ -239,14 +239,14 @@ fn bound_to_value<E: de::Error>(result: PyResult<Py<PyAny>>) -> Result<PyDecoded
 fn cached_map_key(py: Python, key: &str) -> Py<PyString> {
     PY_MAP_KEY_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if let Some(existing) = cache.get(key) {
+        if let Some((_, existing)) = cache.iter().find(|(k, _)| k == key) {
             return existing.clone_ref(py);
         }
         if cache.len() >= PY_MAP_KEY_CACHE_MAX {
-            cache.clear();
+            cache.remove(0);
         }
         let py_key = PyString::new(py, key).unbind();
-        cache.insert(key.to_owned(), py_key.clone_ref(py));
+        cache.push((key.to_owned(), py_key.clone_ref(py)));
         py_key
     })
 }
