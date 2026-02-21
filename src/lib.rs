@@ -931,11 +931,10 @@ struct ReaderIterator {
 }
 
 impl ReaderIterator {
-    fn new(py: Python, reader: Arc<ReaderSource>) -> PyResult<Self> {
-        let ip_version = reader.metadata().ip_version;
-
-        // For IPv4 databases, iterate over IPv4 range only
-        // For IPv6 databases, iterate over IPv6 range only (includes IPv4-mapped addresses)
+    #[inline]
+    fn root_network_for_ip_version(
+        ip_version: u16,
+    ) -> PyResult<(ipnetwork::IpNetwork, &'static str)> {
         let (network_str, network_type) = if ip_version == 4 {
             ("0.0.0.0/0", "IPv4")
         } else {
@@ -948,6 +947,29 @@ impl ReaderIterator {
                 network_type, e
             ))
         })?;
+        Ok((network, network_type))
+    }
+
+    #[inline]
+    fn network_to_python(&self, py: Python, ip_net: ipnetwork::IpNetwork) -> PyResult<Py<PyAny>> {
+        let (class, addr_int, prefix_len) = match ip_net {
+            ipnetwork::IpNetwork::V4(v4) => (
+                self.ipv4_network_cls.bind(py),
+                u32::from(v4.ip()) as u128,
+                v4.prefix(),
+            ),
+            ipnetwork::IpNetwork::V6(v6) => (
+                self.ipv6_network_cls.bind(py),
+                u128::from(v6.ip()),
+                v6.prefix(),
+            ),
+        };
+        Ok(class.call1(((addr_int, prefix_len),))?.unbind())
+    }
+
+    fn new(py: Python, reader: Arc<ReaderSource>) -> PyResult<Self> {
+        let ip_version = reader.metadata().ip_version;
+        let (network, network_type) = Self::root_network_for_ip_version(ip_version)?;
 
         let iter = ReaderWithin::new(&reader, network).map_err(|e| {
             InvalidDatabaseError::new_err(format!("Failed to iterate {}: {}", network_type, e))
@@ -978,18 +1000,12 @@ impl ReaderIterator {
                 .map_err(|e| InvalidDatabaseError::new_err(format!("Iteration error: {}", e)))?,
             None => return Ok(None),
         };
-
-        // Convert IpNetwork to Python ipaddress.IPv4Network or IPv6Network
-        let (class, network_str) = match next_item.ip_net {
-            ipnetwork::IpNetwork::V4(v4) => (self.ipv4_network_cls.bind(py), v4.to_string()),
-            ipnetwork::IpNetwork::V6(v6) => (self.ipv6_network_cls.bind(py), v6.to_string()),
-        };
-        let network_obj = class.call1((network_str,))?;
+        let network_obj = self.network_to_python(py, next_item.ip_net)?;
 
         // Record is already materialized as a Python object
         let data_obj = next_item.data.into_py();
 
-        Ok(Some((network_obj.unbind(), data_obj)))
+        Ok(Some((network_obj, data_obj)))
     }
 }
 
