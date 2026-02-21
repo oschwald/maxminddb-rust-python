@@ -525,11 +525,6 @@ impl Reader {
     ///     {'city': {'names': {'en': 'Mountain View'}}, ...}
     #[inline]
     fn get(&self, py: Python, ip_address: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        // Quick check if database is closed
-        if self.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err(ERR_CLOSED_DB));
-        }
-
         // Parse IP address - support string or ipaddress objects
         let parsed_ip = parse_ip_address(ip_address)?;
 
@@ -575,11 +570,6 @@ impl Reader {
         ip_address: &Bound<'_, PyAny>,
         path: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
-        // Quick check if database is closed
-        if self.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err(ERR_CLOSED_DB));
-        }
-
         // Parse IP address
         let parsed_ip = parse_ip_address(ip_address)?;
 
@@ -634,11 +624,6 @@ impl Reader {
         py: Python,
         ip_address: &Bound<'_, PyAny>,
     ) -> PyResult<(Py<PyAny>, usize)> {
-        // Quick check if database is closed
-        if self.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err(ERR_CLOSED_DB));
-        }
-
         // Parse IP address - support string or ipaddress objects
         let parsed_ip = parse_ip_address(ip_address)?;
 
@@ -688,11 +673,6 @@ impl Reader {
     ///     >>> len(results)
     ///     3
     fn get_many(&self, py: Python, ips: Vec<String>) -> PyResult<Vec<Py<PyAny>>> {
-        // Quick check if database is closed
-        if self.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err(ERR_CLOSED_DB));
-        }
-
         let reader = self.get_reader()?;
         let mut objects = Vec::with_capacity(ips.len());
         for ip in &ips {
