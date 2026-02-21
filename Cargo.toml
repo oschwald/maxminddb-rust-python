@@ -16,6 +16,7 @@ ipnetwork = "0.21"
 maxminddb = { version = "0.27.3", features = ["simdutf8"] }
 memmap2 = "0.9"
 pyo3 = { version = "0.28.2", features = ["extension-module", "generate-import-lib"] }
+rustc-hash = "2"
 serde = "1.0"
 
 [features]

@@ -11,6 +11,7 @@ use pyo3::{
     prelude::*,
     types::{PyBytes, PyDict, PyList, PyModule, PyString, PyTuple},
 };
+use rustc_hash::FxHashMap;
 use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 use std::{
     cell::RefCell,
@@ -29,7 +30,8 @@ use std::{
 };
 
 thread_local! {
-    static PY_MAP_KEY_CACHE: RefCell<Vec<(String, Py<PyString>)>> = const { RefCell::new(Vec::new()) };
+    static PY_MAP_KEY_CACHE: RefCell<FxHashMap<String, Py<PyString>>> =
+        RefCell::new(FxHashMap::default());
 }
 
 const PY_MAP_KEY_CACHE_MAX: usize = 256;
@@ -220,9 +222,7 @@ impl<'de, 'py> Visitor<'de> for PyValueVisitor<'py> {
         let dict = PyDict::new(self.py);
         while let Some(key) = map.next_key::<&'de str>()? {
             let value = map.next_value_seed(PyValueSeed::new(self.py))?;
-            let py_key = cached_map_key(self.py, key);
-            dict.set_item(py_key.bind(self.py), value.into_py())
-                .map_err(pyerr_to_de_error)?;
+            set_cached_map_item(self.py, &dict, key, value.into_py()).map_err(pyerr_to_de_error)?;
         }
         Ok(PyDecodedValue::new(dict.into_any().unbind()))
     }
@@ -236,18 +236,24 @@ fn bound_to_value<E: de::Error>(result: PyResult<Py<PyAny>>) -> Result<PyDecoded
     result.map(PyDecodedValue::new).map_err(pyerr_to_de_error)
 }
 
-fn cached_map_key(py: Python, key: &str) -> Py<PyString> {
+fn set_cached_map_item(
+    py: Python,
+    dict: &Bound<'_, PyDict>,
+    key: &str,
+    value: Py<PyAny>,
+) -> PyResult<()> {
     PY_MAP_KEY_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if let Some((_, existing)) = cache.iter().find(|(k, _)| k == key) {
-            return existing.clone_ref(py);
+        if let Some(existing) = cache.get(key) {
+            return dict.set_item(existing.bind(py), value);
         }
         if cache.len() >= PY_MAP_KEY_CACHE_MAX {
-            cache.remove(0);
+            cache.clear();
         }
         let py_key = PyString::new(py, key).unbind();
-        cache.push((key.to_owned(), py_key.clone_ref(py)));
-        py_key
+        let result = dict.set_item(py_key.bind(py), value);
+        cache.insert(key.to_owned(), py_key);
+        result
     })
 }
 
