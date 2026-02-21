@@ -1018,30 +1018,30 @@ impl ReaderWithin {
 }
 
 fn parse_path(path: &Bound<'_, PyAny>) -> PyResult<Vec<OwnedPathElement>> {
-    let mut owned_path = Vec::new();
+    const ERR_PATH_SEQUENCE: &str = "Path must be a sequence (list or tuple)";
+    const ERR_PATH_ELEMENT: &str = "Path elements must be strings or integers";
+
     if path.is_instance_of::<PyString>() {
-        return Err(PyTypeError::new_err(
-            "Path must be a sequence (list or tuple)",
-        ));
+        return Err(PyTypeError::new_err(ERR_PATH_SEQUENCE));
     }
-    if let Ok(iterator) = path.try_iter() {
-        for item in iterator {
-            let item = item?;
-            if let Ok(s) = item.extract::<String>() {
-                owned_path.push(OwnedPathElement::Key(s));
-            } else if let Ok(i) = item.extract::<usize>() {
-                owned_path.push(OwnedPathElement::Index(i));
-            } else {
-                return Err(PyTypeError::new_err(
-                    "Path elements must be strings or integers",
-                ));
-            }
+
+    let iterator = path
+        .try_iter()
+        .map_err(|_| PyTypeError::new_err(ERR_PATH_SEQUENCE))?;
+    let mut owned_path = Vec::new();
+    for item in iterator {
+        let item = item?;
+        if let Ok(s) = item.extract::<String>() {
+            owned_path.push(OwnedPathElement::Key(s));
+            continue;
         }
-    } else {
-        return Err(PyTypeError::new_err(
-            "Path must be a sequence (list or tuple)",
-        ));
+        if let Ok(i) = item.extract::<usize>() {
+            owned_path.push(OwnedPathElement::Index(i));
+            continue;
+        }
+        return Err(PyTypeError::new_err(ERR_PATH_ELEMENT));
     }
+
     Ok(owned_path)
 }
 
