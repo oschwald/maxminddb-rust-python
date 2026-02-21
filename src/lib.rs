@@ -15,7 +15,7 @@ use rustc_hash::FxHashMap;
 use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 use std::{
     cell::RefCell,
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     fmt,
     fs::File,
     io::Read as IoRead,
@@ -248,7 +248,7 @@ fn set_cached_map_item(
             return dict.set_item(existing.bind(py), value);
         }
         if cache.len() >= PY_MAP_KEY_CACHE_MAX {
-            cache.clear();
+            return dict.set_item(PyString::new(py, key), value);
         }
         let py_key = PyString::new(py, key).unbind();
         let result = dict.set_item(py_key.bind(py), value);
@@ -269,6 +269,38 @@ const MODE_FD: i32 = 16;
 const ERR_CLOSED_DB: &str = "Attempt to read from a closed MaxMind DB.";
 const ERR_BAD_DATA: &str =
     "The MaxMind DB file's data section contains bad data (unknown data type or corrupt data)";
+const ERR_UNSUPPORTED_FILE_MODE: &str =
+    "MODE_FILE not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY";
+const ERR_UNSUPPORTED_FD_MODE: &str =
+    "MODE_FD not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY";
+const ERR_BAD_DATABASE_ARG: &str = "database must be a string, PathLike, or file descriptor";
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum OpenMode {
+    MmapExt,
+    Mmap,
+    File,
+    Memory,
+    Fd,
+}
+
+impl TryFrom<i32> for OpenMode {
+    type Error = PyErr;
+
+    fn try_from(mode: i32) -> Result<Self, Self::Error> {
+        match mode {
+            MODE_AUTO => Ok(Self::Mmap),
+            MODE_MMAP_EXT => Ok(Self::MmapExt),
+            MODE_MMAP => Ok(Self::Mmap),
+            MODE_FILE => Ok(Self::File),
+            MODE_MEMORY => Ok(Self::Memory),
+            MODE_FD => Ok(Self::Fd),
+            _ => Err(PyValueError::new_err(format!(
+                "Unsupported open mode ({mode})"
+            ))),
+        }
+    }
+}
 
 enum OwnedPathElement {
     Key(String),
@@ -448,7 +480,7 @@ struct Reader {
     reader: Arc<RwLock<Option<Arc<ReaderSource>>>>,
     closed: Arc<AtomicBool>,
     ip_version: u16,
-    path_cache: Mutex<Vec<CachedPath>>,
+    path_cache: Mutex<VecDeque<CachedPath>>,
 }
 
 #[pymethods]
@@ -456,42 +488,9 @@ impl Reader {
     #[new]
     #[pyo3(signature = (database, mode=MODE_AUTO))]
     fn new(database: &Bound<'_, PyAny>, mode: i32) -> PyResult<Self> {
-        // Extract path from database parameter
-        let path = if let Ok(s) = database.extract::<String>() {
-            s
-        } else {
-            // Try to get __fspath__ for PathLike objects
-            match database.call_method0("__fspath__") {
-                Ok(fspath) => fspath.extract::<String>()?,
-                Err(_) => {
-                    return Err(PyValueError::new_err(
-                        "database must be a string, PathLike, or file descriptor",
-                    ));
-                }
-            }
-        };
-
-        // Determine which mode to use
-        let actual_mode = if mode == MODE_AUTO {
-            MODE_MMAP // Default to mmap for best performance
-        } else {
-            mode
-        };
-
-        // Validate and open database with appropriate mode
-        match actual_mode {
-            MODE_MMAP | MODE_MMAP_EXT => open_database_mmap(&path),
-            MODE_MEMORY => open_database_memory(&path),
-            MODE_FILE => Err(PyValueError::new_err(
-                "MODE_FILE not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY",
-            )),
-            MODE_FD => Err(PyValueError::new_err(
-                "MODE_FD not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY",
-            )),
-            _ => Err(PyValueError::new_err(format!(
-                "Unsupported open mode ({actual_mode})"
-            ))),
-        }
+        let path = Self::extract_database_path(database)?;
+        let open_mode = Self::resolve_open_mode(mode)?;
+        Self::open_reader_from_mode(&path, open_mode)
     }
 
     /// Check if the database has been closed.
@@ -653,7 +652,8 @@ impl Reader {
     ///
     /// This is an extension method not available in the original maxminddb module.
     /// It provides better performance than calling get() repeatedly by reducing
-    /// call overhead and releasing the GIL during the entire batch operation.
+    /// call overhead. This method does not release the Python GIL while
+    /// processing the batch.
     ///
     /// Args:
     ///     ips: A list of IP address strings to look up (e.g., ['1.2.3.4', '8.8.8.8']).
@@ -673,7 +673,14 @@ impl Reader {
     ///     >>> results = reader.get_many(ips)
     ///     >>> len(results)
     ///     3
+    ///
+    /// Notes:
+    ///     This method keeps the GIL for the duration of the batch. For better
+    ///     concurrency with other Python threads, consider smaller batch sizes,
+    ///     per-item lookups, or running lookups in a separate worker thread.
     fn get_many(&self, py: Python, ips: Vec<String>) -> PyResult<Vec<Py<PyAny>>> {
+        // Keep work under the GIL for lower per-item overhead; callers wanting
+        // concurrent Python execution should prefer smaller batches or threading.
         let reader = self.get_reader()?;
         let mut objects = Vec::with_capacity(ips.len());
         for ip in &ips {
@@ -833,6 +840,30 @@ impl Reader {
 
 // Internal helper methods for Reader
 impl Reader {
+    fn extract_database_path(database: &Bound<'_, PyAny>) -> PyResult<String> {
+        if let Ok(s) = database.extract::<String>() {
+            return Ok(s);
+        }
+
+        match database.call_method0("__fspath__") {
+            Ok(fspath) => fspath.extract::<String>(),
+            Err(_) => Err(PyValueError::new_err(ERR_BAD_DATABASE_ARG)),
+        }
+    }
+
+    fn resolve_open_mode(mode: i32) -> PyResult<OpenMode> {
+        OpenMode::try_from(mode)
+    }
+
+    fn open_reader_from_mode(path: &str, mode: OpenMode) -> PyResult<Self> {
+        match mode {
+            OpenMode::Mmap | OpenMode::MmapExt => open_database_mmap(path),
+            OpenMode::Memory => open_database_memory(path),
+            OpenMode::File => Err(PyValueError::new_err(ERR_UNSUPPORTED_FILE_MODE)),
+            OpenMode::Fd => Err(PyValueError::new_err(ERR_UNSUPPORTED_FD_MODE)),
+        }
+    }
+
     fn get_or_parse_path(
         &self,
         py: Python,
@@ -855,10 +886,15 @@ impl Reader {
 
         let parsed = Arc::new(parse_path(path)?);
         if let Ok(mut cache) = self.path_cache.lock() {
-            if cache.len() >= PATH_CACHE_MAX_ENTRIES {
-                cache.remove(0);
+            for (cached_tuple, cached_path) in cache.iter() {
+                if cached_tuple.bind(py).as_ptr() == path_ptr {
+                    return Ok(Arc::clone(cached_path));
+                }
             }
-            cache.push((path_tuple.clone().unbind(), Arc::clone(&parsed)));
+            if cache.len() >= PATH_CACHE_MAX_ENTRIES {
+                cache.pop_front();
+            }
+            cache.push_back((path_tuple.clone().unbind(), Arc::clone(&parsed)));
         }
         Ok(parsed)
     }
@@ -874,7 +910,11 @@ impl Reader {
     }
 }
 
-/// Iterator for Reader that yields (network, record) tuples
+/// Iterator for Reader that yields `(network, record)` tuples.
+///
+/// Safety:
+/// `_reader_guard` must remain declared before `iter`. `iter` is produced via
+/// `extend_within_lifetime`, which relies on `_reader_guard` being dropped last.
 #[pyclass(module = "maxminddb_rust.extension")]
 struct ReaderIterator {
     _reader_guard: Arc<ReaderSource>,
@@ -1096,7 +1136,7 @@ fn create_reader(source: ReaderSource) -> Reader {
         reader: Arc::new(RwLock::new(Some(Arc::new(source)))),
         closed: Arc::new(AtomicBool::new(false)),
         ip_version,
-        path_cache: Mutex::new(Vec::new()),
+        path_cache: Mutex::new(VecDeque::new()),
     }
 }
 
