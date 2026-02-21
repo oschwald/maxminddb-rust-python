@@ -171,7 +171,7 @@ The `examples/` directory contains complete working examples demonstrating vario
 - **[context_manager.py](https://github.com/oschwald/maxminddb-rust-python/blob/main/examples/context_manager.py)** - Using `with` statement for automatic resource cleanup
 - **[iterator_demo.py](https://github.com/oschwald/maxminddb-rust-python/blob/main/examples/iterator_demo.py)** - Iterating over all networks in the database
 - **[batch_processing.py](https://github.com/oschwald/maxminddb-rust-python/blob/main/examples/batch_processing.py)** - High-performance batch lookups with `get_many()`
-- **[benchmark_path.py](https://github.com/oschwald/maxminddb-rust-python/blob/main/examples/benchmark_path.py)**
+- **[benchmarks/benchmark_path.py](https://github.com/oschwald/maxminddb-rust-python/blob/main/benchmarks/benchmark_path.py)**
   - Performance comparison between `get()` and `get_path()`
 
 Run any example:
@@ -195,17 +195,22 @@ uv run python examples/batch_processing.py
 
 ## Benchmarking
 
+Benchmark scripts are consolidated in the `benchmarks/` directory.
+
 Run the included benchmarks (after building from source):
 
 ```bash
 # Single lookup benchmark
-uv run python benchmark.py --file /var/lib/GeoIP/GeoIP2-City.mmdb --count 250000
+uv run python benchmarks/benchmark.py --file /var/lib/GeoIP/GeoIP2-City.mmdb --count 250000
 
 # Comprehensive benchmark across multiple databases
-uv run python benchmark_comprehensive.py --count 250000
+uv run python benchmarks/benchmark_comprehensive.py --count 250000
 
 # Batch lookup benchmark
-uv run python benchmark_batch.py --file /var/lib/GeoIP/GeoIP2-City.mmdb --batch-size 100
+uv run python benchmarks/benchmark_batch.py --file /var/lib/GeoIP/GeoIP2-City.mmdb --batch-size 100
+
+# get() vs get_path() benchmark
+uv run python benchmarks/benchmark_path.py --file /var/lib/GeoIP/GeoLite2-City.mmdb --count 250000
 ```
 
 ## Testing
