@@ -514,8 +514,7 @@ impl Reader {
 
         let reader = self.get_reader()?;
 
-        // Release GIL during lookup for better concurrency
-        let lookup_result = py.detach(|| reader.lookup(parsed_ip.addr));
+        let lookup_result = reader.lookup(parsed_ip.addr);
 
         match lookup_result {
             Ok(Some(data)) => Ok(data.into_py()),
@@ -573,7 +572,7 @@ impl Reader {
         // But since we are passing ownership of `path` (Vec<String>) into the closure,
         // and constructing the Vec<&str> inside, it should work.
 
-        let result = py.detach(move || reader.lookup_path(parsed_ip.addr, &owned_path));
+        let result = reader.lookup_path(parsed_ip.addr, &owned_path);
 
         match result {
             Ok(Some(data)) => Ok(data.into_py()),
@@ -624,8 +623,7 @@ impl Reader {
 
         let reader = self.get_reader()?;
 
-        // Release GIL during lookup
-        let result = py.detach(|| reader.lookup_prefix(parsed_ip.addr));
+        let result = reader.lookup_prefix(parsed_ip.addr);
 
         match result {
             Ok((Some(data), prefix_len)) => {
