@@ -1150,22 +1150,26 @@ fn reader_from_source<S: AsRef<[u8]>>(path: &str, source: S) -> PyResult<MaxMind
     })
 }
 
+#[inline]
+fn load_reader<F, S>(path: &str, load_source: F) -> PyResult<MaxMindReader<S>>
+where
+    F: FnOnce(&str) -> PyResult<S> + Send,
+    S: AsRef<[u8]> + Send,
+{
+    Python::attach(|py| {
+        py.detach(|| load_source(path).and_then(|source| reader_from_source(path, source)))
+    })
+}
+
 /// Open a MaxMind DB using memory-mapped files (MODE_MMAP)
 fn open_database_mmap(path: &str) -> PyResult<Reader> {
-    // Release GIL during file I/O operation
-    let reader = Python::attach(|py| {
-        py.detach(|| {
-            let file = open_file(path)?;
-
-            // Safety: The mmap is read-only and the file won't be modified
-            let mmap = unsafe {
-                Mmap::map(&file).map_err(|e| {
-                    PyIOError::new_err(format!("Failed to memory-map database: {e}"))
-                })?
-            };
-
-            reader_from_source(path, mmap)
-        })
+    let reader = load_reader(path, |path| {
+        let file = open_file(path)?;
+        // Safety: The mmap is read-only and the file won't be modified.
+        unsafe {
+            Mmap::map(&file)
+                .map_err(|e| PyIOError::new_err(format!("Failed to memory-map database: {e}")))
+        }
     })?;
 
     Ok(create_reader(ReaderSource::Mmap(reader)))
@@ -1173,17 +1177,12 @@ fn open_database_mmap(path: &str) -> PyResult<Reader> {
 
 /// Open a MaxMind DB by loading entire file into memory (MODE_MEMORY)
 fn open_database_memory(path: &str) -> PyResult<Reader> {
-    // Release GIL during file I/O operation
-    let reader = Python::attach(|py| {
-        py.detach(|| {
-            let mut file = open_file(path)?;
-
-            let mut buffer = Vec::new();
-            file.read_to_end(&mut buffer)
-                .map_err(|e| PyIOError::new_err(format!("Failed to read database file: {e}")))?;
-
-            reader_from_source(path, buffer)
-        })
+    let reader = load_reader(path, |path| {
+        let mut file = open_file(path)?;
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer)
+            .map_err(|e| PyIOError::new_err(format!("Failed to read database file: {e}")))?;
+        Ok(buffer)
     })?;
 
     Ok(create_reader(ReaderSource::Memory(reader)))
