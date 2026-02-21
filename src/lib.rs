@@ -588,11 +588,6 @@ impl Reader {
 
         let reader = self.get_reader()?;
 
-        // We need to keep the Strings alive while we use them as &str
-        // This is a bit tricky because we're crossing the thread boundary with py.detach
-        // But since we are passing ownership of `path` (Vec<String>) into the closure,
-        // and constructing the Vec<&str> inside, it should work.
-
         let result = reader.lookup_path(parsed_ip, &owned_path);
 
         match result {
@@ -1103,6 +1098,16 @@ fn create_reader(source: ReaderSource) -> Reader {
     }
 }
 
+#[inline]
+fn reader_from_source<S: AsRef<[u8]>>(path: &str, source: S) -> PyResult<MaxMindReader<S>> {
+    MaxMindReader::from_source(source).map_err(|_| {
+        InvalidDatabaseError::new_err(format!(
+            "Error opening database file ({}). Is this a valid MaxMind DB file?",
+            path
+        ))
+    })
+}
+
 /// Open a MaxMind DB using memory-mapped files (MODE_MMAP)
 fn open_database_mmap(path: &str) -> PyResult<Reader> {
     // Release GIL during file I/O operation
@@ -1117,12 +1122,7 @@ fn open_database_mmap(path: &str) -> PyResult<Reader> {
                 })?
             };
 
-            MaxMindReader::from_source(mmap).map_err(|_| {
-                InvalidDatabaseError::new_err(format!(
-                    "Error opening database file ({}). Is this a valid MaxMind DB file?",
-                    path
-                ))
-            })
+            reader_from_source(path, mmap)
         })
     })?;
 
@@ -1140,12 +1140,7 @@ fn open_database_memory(path: &str) -> PyResult<Reader> {
             file.read_to_end(&mut buffer)
                 .map_err(|e| PyIOError::new_err(format!("Failed to read database file: {e}")))?;
 
-            MaxMindReader::from_source(buffer).map_err(|_| {
-                InvalidDatabaseError::new_err(format!(
-                    "Error opening database file ({}). Is this a valid MaxMind DB file?",
-                    path
-                ))
-            })
+            reader_from_source(path, buffer)
         })
     })?;
 
