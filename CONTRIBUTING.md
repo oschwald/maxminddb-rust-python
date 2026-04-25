@@ -30,8 +30,9 @@ maturin build --release
 # Run Python code with the built module
 uv run python your_script.py
 
-# Run benchmarks
-uv run python benchmark.py --file /path/to/database.mmdb
+# Run benchmarks from the benchmarks/ directory
+uv run python benchmarks/benchmark.py --file /path/to/database.mmdb
+uv run python benchmarks/benchmark_parallel.py --count 500000 --workers 1,2,4,8
 ```
 
 ## Testing
