@@ -867,20 +867,14 @@ impl Reader {
         };
         let path_ptr = path_tuple.as_ptr();
 
-        if let Ok(cache) = self.path_cache.lock() {
-            for (cached_tuple, cached_path) in cache.iter() {
-                if cached_tuple.bind(py).as_ptr() == path_ptr {
-                    return Ok(Arc::clone(cached_path));
-                }
-            }
+        if let Some(cached_path) = self.lookup_cached_path(py, path_ptr) {
+            return Ok(cached_path);
         }
 
         let parsed = Arc::new(parse_path(path)?);
         if let Ok(mut cache) = self.path_cache.lock() {
-            for (cached_tuple, cached_path) in cache.iter() {
-                if cached_tuple.bind(py).as_ptr() == path_ptr {
-                    return Ok(Arc::clone(cached_path));
-                }
+            if let Some(cached_path) = Self::lookup_cached_path_in_cache(py, path_ptr, &cache) {
+                return Ok(cached_path);
             }
             if cache.len() >= PATH_CACHE_MAX_ENTRIES {
                 cache.pop_front();
@@ -896,6 +890,29 @@ impl Reader {
         self.reader
             .load_full()
             .ok_or_else(|| PyValueError::new_err(ERR_CLOSED_DB))
+    }
+
+    #[inline]
+    fn lookup_cached_path(
+        &self,
+        py: Python,
+        path_ptr: *mut pyo3::ffi::PyObject,
+    ) -> Option<Arc<Vec<OwnedPathElement>>> {
+        self.path_cache
+            .lock()
+            .ok()
+            .and_then(|cache| Self::lookup_cached_path_in_cache(py, path_ptr, &cache))
+    }
+
+    #[inline]
+    fn lookup_cached_path_in_cache(
+        py: Python,
+        path_ptr: *mut pyo3::ffi::PyObject,
+        cache: &VecDeque<CachedPath>,
+    ) -> Option<Arc<Vec<OwnedPathElement>>> {
+        cache.iter().find_map(|(cached_tuple, cached_path)| {
+            (cached_tuple.bind(py).as_ptr() == path_ptr).then(|| Arc::clone(cached_path))
+        })
     }
 }
 
