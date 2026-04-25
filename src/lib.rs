@@ -1,4 +1,5 @@
 use ::maxminddb as maxminddb_crate;
+use arc_swap::ArcSwapOption;
 use maxminddb_crate::{
     MaxMindDbError, PathElement, Reader as MaxMindReader, Within, WithinOptions,
 };
@@ -25,7 +26,7 @@ use std::{
     str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex, RwLock,
+        Arc, Mutex,
     },
 };
 
@@ -494,7 +495,7 @@ impl Metadata {
 /// Supports both memory-mapped files (MODE_MMAP) and in-memory (MODE_MEMORY) modes.
 #[pyclass(module = "maxminddb_rust.extension")]
 struct Reader {
-    reader: Arc<RwLock<Option<Arc<ReaderSource>>>>,
+    reader: ArcSwapOption<ReaderSource>,
     closed: Arc<AtomicBool>,
     ip_version: u16,
     path_cache: Mutex<VecDeque<CachedPath>>,
@@ -554,7 +555,10 @@ impl Reader {
             return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip)));
         }
 
-        let reader = self.get_reader()?;
+        let reader = self.reader.load();
+        let reader = reader
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err(ERR_CLOSED_DB))?;
 
         let lookup_result = reader.lookup(parsed_ip);
 
@@ -602,7 +606,10 @@ impl Reader {
         // Parse path (cache tuple paths, which are immutable and commonly reused)
         let owned_path = self.get_or_parse_path(py, path)?;
 
-        let reader = self.get_reader()?;
+        let reader = self.reader.load();
+        let reader = reader
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err(ERR_CLOSED_DB))?;
 
         let result = reader.lookup_path(parsed_ip, &owned_path);
 
@@ -648,7 +655,10 @@ impl Reader {
             return Err(PyValueError::new_err(ipv6_in_ipv4_error(&parsed_ip)));
         }
 
-        let reader = self.get_reader()?;
+        let reader = self.reader.load();
+        let reader = reader
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err(ERR_CLOSED_DB))?;
 
         let result = reader.lookup_prefix(parsed_ip);
 
@@ -698,7 +708,10 @@ impl Reader {
     fn get_many(&self, py: Python, ips: Vec<String>) -> PyResult<Vec<Py<PyAny>>> {
         // Keep work under the GIL for lower per-item overhead; callers wanting
         // concurrent Python execution should prefer smaller batches or threading.
-        let reader = self.get_reader()?;
+        let reader = self.reader.load();
+        let reader = reader
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err(ERR_CLOSED_DB))?;
         let mut objects = Vec::with_capacity(ips.len());
         for ip in &ips {
             let ip_addr: IpAddr = ip
@@ -755,9 +768,10 @@ impl Reader {
             return Err(PyOSError::new_err(ERR_CLOSED_DB));
         }
 
-        let reader = self
-            .get_reader()
-            .map_err(|_| PyOSError::new_err(ERR_CLOSED_DB))?;
+        let reader = self.reader.load();
+        let reader = reader
+            .as_ref()
+            .ok_or_else(|| PyOSError::new_err(ERR_CLOSED_DB))?;
 
         let meta = reader.metadata();
 
@@ -777,9 +791,7 @@ impl Reader {
     fn close(&self) {
         // Set closed flag and clear the reader
         self.closed.store(true, Ordering::Release);
-        if let Ok(mut guard) = self.reader.write() {
-            *guard = None;
-        }
+        self.reader.store(None);
     }
 
     /// Enter the context manager (for use with 'with' statement).
@@ -910,9 +922,7 @@ impl Reader {
     #[inline]
     fn get_reader(&self) -> PyResult<Arc<ReaderSource>> {
         self.reader
-            .read()
-            .map_err(|_| PyValueError::new_err(ERR_CLOSED_DB))?
-            .clone()
+            .load_full()
             .ok_or_else(|| PyValueError::new_err(ERR_CLOSED_DB))
     }
 }
@@ -1156,7 +1166,7 @@ fn open_file(path: &str) -> PyResult<File> {
 fn create_reader(source: ReaderSource) -> Reader {
     let ip_version = source.metadata().ip_version;
     Reader {
-        reader: Arc::new(RwLock::new(Some(Arc::new(source)))),
+        reader: ArcSwapOption::from_pointee(source),
         closed: Arc::new(AtomicBool::new(false)),
         ip_version,
         path_cache: Mutex::new(VecDeque::new()),
