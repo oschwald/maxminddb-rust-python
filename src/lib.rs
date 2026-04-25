@@ -24,10 +24,7 @@ use std::{
     net::IpAddr,
     path::Path,
     str::FromStr,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
 };
 
 thread_local! {
@@ -496,7 +493,6 @@ impl Metadata {
 #[pyclass(module = "maxminddb_rust.extension")]
 struct Reader {
     reader: ArcSwapOption<ReaderSource>,
-    closed: Arc<AtomicBool>,
     ip_version: u16,
     path_cache: Mutex<VecDeque<CachedPath>>,
 }
@@ -525,7 +521,7 @@ impl Reader {
     ///     True
     #[getter]
     fn closed(&self) -> bool {
-        self.closed.load(Ordering::Relaxed)
+        self.reader.load().is_none()
     }
 
     /// Query the database for information about an IP address.
@@ -702,11 +698,6 @@ impl Reader {
     ///     >>> metadata.ip_version
     ///     6
     fn metadata(&self, _py: Python) -> PyResult<Metadata> {
-        // Quick check if database is closed
-        if self.closed.load(Ordering::Acquire) {
-            return Err(PyOSError::new_err(ERR_CLOSED_DB));
-        }
-
         let reader = self.reader.load();
         let reader = reader
             .as_ref()
@@ -728,8 +719,6 @@ impl Reader {
     ///     >>> reader.close()
     ///     >>> reader.get('8.8.8.8')  # Raises ValueError
     fn close(&self) {
-        // Set closed flag and clear the reader
-        self.closed.store(true, Ordering::Release);
         self.reader.store(None);
     }
 
@@ -745,9 +734,7 @@ impl Reader {
     ///     >>> with maxminddb_rust.open_database('/path/to/GeoIP2-City.mmdb') as reader:
     ///     ...     result = reader.get('8.8.8.8')
     fn __enter__(slf: Py<Self>, py: Python) -> PyResult<Py<Self>> {
-        // Check if database is closed
-        let is_closed = slf.borrow(py).closed.load(Ordering::Acquire);
-        if is_closed {
+        if slf.borrow(py).reader.load().is_none() {
             return Err(PyValueError::new_err(
                 "Attempt to reopen a closed MaxMind DB",
             ));
@@ -786,11 +773,6 @@ impl Reader {
     ///     ...     break
     ///     1.0.0.0/24: AU
     fn __iter__(slf: PyRef<'_, Self>) -> PyResult<ReaderIterator> {
-        // Check if database is closed
-        if slf.closed.load(Ordering::Acquire) {
-            return Err(PyValueError::new_err(ERR_CLOSED_DB));
-        }
-
         let reader = slf.get_reader()?;
         ReaderIterator::new(slf.py(), reader)
     }
@@ -1160,7 +1142,6 @@ fn create_reader(source: ReaderSource) -> Reader {
     let ip_version = source.metadata().ip_version;
     Reader {
         reader: ArcSwapOption::from_pointee(source),
-        closed: Arc::new(AtomicBool::new(false)),
         ip_version,
         path_cache: Mutex::new(VecDeque::new()),
     }
