@@ -12,6 +12,7 @@ name = "maxminddb_rust"
 crate-type = ["cdylib"]
 
 [dependencies]
+arc-swap = "1"
 ipnetwork = "0.21"
 maxminddb = { version = "0.28.0", features = ["simdutf8"] }
 memmap2 = "0.9"
