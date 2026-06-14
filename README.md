@@ -157,11 +157,16 @@ Choose between memory-mapped files (default) and read-file modes:
 ```python
 import maxminddb_rust
 
-# MODE_AUTO: Uses memory-mapped files (default)
+# MODE_AUTO: Currently resolves to MODE_MMAP
 reader = maxminddb_rust.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb_rust.MODE_AUTO)
 
 # MODE_MMAP: Explicitly use memory-mapped files
 reader = maxminddb_rust.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb_rust.MODE_MMAP)
+
+# MODE_MMAP_EXT: Accepted for compatibility; same Rust mmap reader as MODE_MMAP
+reader = maxminddb_rust.open_database(
+    "/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb_rust.MODE_MMAP_EXT
+)
 
 # MODE_MEMORY: Load entire database into memory
 reader = maxminddb_rust.open_database(
@@ -181,6 +186,10 @@ with open("/var/lib/GeoIP/GeoIP2-City.mmdb", "rb") as database:
 `MODE_FD` follows the official package's pure Python behavior: pass a readable
 binary object and the reader calls `read()` from its current position. Raw
 integer OS file descriptors are not accepted directly.
+
+`MODE_MMAP_EXT` is accepted for official-package compatibility. This package
+does not have a separate C extension backend, so it uses the same Rust
+memory-mapped reader as `MODE_MMAP`.
 
 ## Examples
 

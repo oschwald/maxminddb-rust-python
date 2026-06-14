@@ -1353,9 +1353,10 @@ fn fd_database_name(database: &Bound<'_, PyAny>) -> PyResult<String> {
 ///         Raw integer OS file descriptors are not accepted.
 ///     mode: The mode to use when opening the database. Defaults to MODE_AUTO.
 ///         Available modes:
-///         - MODE_AUTO (0): Automatically choose the best mode (uses MODE_MMAP)
+///         - MODE_AUTO (0): Currently resolves to MODE_MMAP
 ///         - MODE_MMAP (2): Use memory-mapped file I/O (default, best performance)
-///         - MODE_MMAP_EXT (1): Same as MODE_MMAP
+///         - MODE_MMAP_EXT (1): Compatibility alias for the same Rust mmap
+///           reader as MODE_MMAP
 ///         - MODE_FILE (4): Read the database file into memory
 ///         - MODE_MEMORY (8): Load entire database into memory
 ///         - MODE_FD (16): Read bytes from a file-like object into memory

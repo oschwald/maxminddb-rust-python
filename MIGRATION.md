@@ -110,7 +110,8 @@ import maxminddb       # Use official implementation (if still needed)
 - Context manager support (`with` statement)
 - Iterator support (iterating over all networks)
 - `Metadata` class and all properties
-- MODE_AUTO, MODE_MMAP, MODE_MMAP_EXT, MODE_MEMORY constants
+- MODE_AUTO, MODE_MMAP, MODE_MMAP_EXT, MODE_FILE, MODE_MEMORY, MODE_FD
+  constants
 - `InvalidDatabaseError` exception
 - String and ipaddress object support
 
@@ -123,6 +124,11 @@ import maxminddb       # Use official implementation (if still needed)
 ### Mode Notes
 
 `MODE_FD` is supported for readable binary objects, matching the official package's pure Python reader behavior. It reads from the object's current position and implies `MODE_MEMORY`. Raw integer OS file descriptors are not accepted directly.
+
+`MODE_AUTO` currently resolves to `MODE_MMAP`. `MODE_MMAP_EXT` is accepted for
+compatibility with the official package, but `maxminddb-rust` does not have a
+separate C extension backend; it uses the same Rust memory-mapped reader as
+`MODE_MMAP`.
 
 ## Example Migration
 
