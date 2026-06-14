@@ -34,6 +34,7 @@ uv run python your_script.py
 uv run python benchmarks/benchmark.py --file /path/to/database.mmdb
 uv run python benchmarks/benchmark_parallel.py --count 500000 --workers 1,2,4,8
 uv run python benchmarks/compare_refs.py --baseline-ref origin/main --candidate-ref HEAD
+uv run python benchmarks/compare_refs.py --json-output bench.json --max-regression-pct 5
 ```
 
 ## Testing

@@ -237,6 +237,9 @@ uv run python benchmarks/benchmark_path.py --file /var/lib/GeoIP/GeoLite2-City.m
 
 # Compare benchmark throughput between two git refs
 uv run python benchmarks/compare_refs.py --baseline-ref origin/main --candidate-ref HEAD
+
+# CI-friendly comparison with JSON output and a 5% regression threshold
+uv run python benchmarks/compare_refs.py --json-output bench.json --max-regression-pct 5
 ```
 
 ## Testing

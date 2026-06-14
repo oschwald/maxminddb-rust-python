@@ -165,14 +165,16 @@ def safe_ref_name(ref: str) -> str:
 
 
 def prepare_ref(
+    label: str,
     ref: str,
     *,
     base_dir: Path,
     root: Path,
     verbose: bool,
 ) -> tuple[Path, Path]:
-    worktree = base_dir / f"worktree-{safe_ref_name(ref)}"
-    venv = base_dir / f"venv-{safe_ref_name(ref)}"
+    safe_name = f"{label}-{safe_ref_name(ref)}"
+    worktree = base_dir / f"worktree-{safe_name}"
+    venv = base_dir / f"venv-{safe_name}"
 
     run_command(
         ["git", "worktree", "add", "--detach", str(worktree), ref],
@@ -233,28 +235,96 @@ def format_rate(result: dict[str, Any]) -> str:
 
 
 def format_delta(baseline: dict[str, Any], candidate: dict[str, Any]) -> str:
-    if not baseline.get("supported") or not candidate.get("supported"):
+    delta = delta_percent(baseline, candidate)
+    if delta is None:
         return "-"
-    delta = (candidate["median"] / baseline["median"] - 1) * 100
     return f"{delta:+.1f}%"
+
+
+def delta_percent(baseline: dict[str, Any], candidate: dict[str, Any]) -> float | None:
+    if not baseline.get("supported") or not candidate.get("supported"):
+        return None
+    baseline_median = baseline["median"]
+    if baseline_median <= 0:
+        return None
+    return (candidate["median"] / baseline_median - 1) * 100
+
+
+def build_summary(
+    *,
+    baseline_ref: str,
+    candidate_ref: str,
+    database: Path,
+    count: int,
+    batch_size: int,
+    repeats: int,
+    warmups: int,
+    cases: list[str],
+    baseline_results: dict[str, dict[str, Any]],
+    candidate_results: dict[str, dict[str, Any]],
+    max_regression_pct: float | None,
+) -> dict[str, Any]:
+    case_summaries = {}
+    regressions = []
+    for case in cases:
+        baseline = baseline_results[case]
+        candidate = candidate_results[case]
+        delta = delta_percent(baseline, candidate)
+        case_summaries[case] = {
+            "baseline": {"ref": baseline_ref, **baseline},
+            "candidate": {"ref": candidate_ref, **candidate},
+            "delta_percent": delta,
+        }
+        if max_regression_pct is None or not baseline.get("supported"):
+            continue
+        if not candidate.get("supported"):
+            regressions.append(
+                {
+                    "case": case,
+                    "reason": "candidate_unsupported",
+                    "max_regression_pct": max_regression_pct,
+                }
+            )
+        elif delta is not None and delta < -max_regression_pct:
+            regressions.append(
+                {
+                    "case": case,
+                    "delta_percent": delta,
+                    "max_regression_pct": max_regression_pct,
+                }
+            )
+
+    return {
+        "baseline_ref": baseline_ref,
+        "candidate_ref": candidate_ref,
+        "database": str(database),
+        "count": count,
+        "batch_size": batch_size,
+        "repeats": repeats,
+        "warmups": warmups,
+        "max_regression_pct": max_regression_pct,
+        "cases": case_summaries,
+        "regressions": regressions,
+    }
 
 
 def print_table(
     cases: list[str],
-    baseline_ref: str,
-    candidate_ref: str,
-    results: dict[str, dict[str, dict[str, Any]]],
+    baseline_label: str,
+    candidate_label: str,
+    baseline_results: dict[str, dict[str, Any]],
+    candidate_results: dict[str, dict[str, Any]],
 ) -> None:
     rows = [
         (
             case,
-            format_rate(results[baseline_ref][case]),
-            format_rate(results[candidate_ref][case]),
-            format_delta(results[baseline_ref][case], results[candidate_ref][case]),
+            format_rate(baseline_results[case]),
+            format_rate(candidate_results[case]),
+            format_delta(baseline_results[case], candidate_results[case]),
         )
         for case in cases
     ]
-    headers = ("case", baseline_ref, candidate_ref, "delta")
+    headers = ("case", baseline_label, candidate_label, "delta")
     widths = [
         max(len(str(row[index])) for row in (headers, *rows))
         for index in range(len(headers))
@@ -296,6 +366,21 @@ def parse_args() -> argparse.Namespace:
         help="benchmark case to run; may be specified more than once",
     )
     parser.add_argument("--keep-worktrees", action="store_true")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="write the benchmark summary as JSON to stdout instead of a table",
+    )
+    parser.add_argument(
+        "--json-output",
+        type=Path,
+        help="write the benchmark summary as JSON to this file",
+    )
+    parser.add_argument(
+        "--max-regression-pct",
+        type=float,
+        help="exit non-zero if a supported case regresses by more than this percentage",
+    )
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args()
 
@@ -314,10 +399,18 @@ def main() -> None:
         raise ValueError("--repeats must be positive")
     if args.warmups < 0:
         raise ValueError("--warmups must be non-negative")
+    if args.max_regression_pct is not None and args.max_regression_pct < 0:
+        raise ValueError("--max-regression-pct must be non-negative")
 
     cases = args.case or list(DEFAULT_CASES)
-    refs = [args.baseline_ref, args.candidate_ref]
-    results: dict[str, dict[str, dict[str, Any]]] = {ref: {} for ref in refs}
+    refs = [
+        ("baseline", args.baseline_ref),
+        ("candidate", args.candidate_ref),
+    ]
+    results: dict[str, dict[str, dict[str, Any]]] = {
+        "baseline": {},
+        "candidate": {},
+    }
 
     temp_context = None
     if args.keep_worktrees:
@@ -329,20 +422,24 @@ def main() -> None:
     worktrees: list[Path] = []
     try:
         interpreters: dict[str, Path] = {}
-        for ref in refs:
+        for label, ref in refs:
             started = time.perf_counter()
             worktree, python = prepare_ref(
-                ref, base_dir=temp_dir, root=root, verbose=args.verbose
+                label,
+                ref,
+                base_dir=temp_dir,
+                root=root,
+                verbose=args.verbose,
             )
             worktrees.append(worktree)
-            interpreters[ref] = python
+            interpreters[label] = python
             elapsed = time.perf_counter() - started
             print(f"Prepared {ref} in {elapsed:.1f}s", file=sys.stderr)
 
-        for ref in refs:
+        for label, ref in refs:
             for case in cases:
-                results[ref][case] = benchmark_case(
-                    interpreters[ref],
+                results[label][case] = benchmark_case(
+                    interpreters[label],
                     case=case,
                     database=database,
                     count=args.count,
@@ -353,7 +450,7 @@ def main() -> None:
                     verbose=args.verbose,
                 )
                 print(
-                    f"Benchmarked {ref} {case}: {format_rate(results[ref][case])}",
+                    f"Benchmarked {ref} {case}: {format_rate(results[label][case])}",
                     file=sys.stderr,
                 )
     finally:
@@ -370,20 +467,67 @@ def main() -> None:
             if temp_context is not None:
                 temp_context.cleanup()
 
-    print()
-    print(f"Database: {database}")
-    print(
-        textwrap.dedent(
-            f"""\
-            Count: {args.count:,}
-            Batch size: {args.batch_size:,}
-            Repeats: {args.repeats:,}
-            Warmups: {args.warmups:,}
-            """
-        ).rstrip()
+    summary = build_summary(
+        baseline_ref=args.baseline_ref,
+        candidate_ref=args.candidate_ref,
+        database=database,
+        count=args.count,
+        batch_size=args.batch_size,
+        repeats=args.repeats,
+        warmups=args.warmups,
+        cases=cases,
+        baseline_results=results["baseline"],
+        candidate_results=results["candidate"],
+        max_regression_pct=args.max_regression_pct,
     )
-    print()
-    print_table(cases, args.baseline_ref, args.candidate_ref, results)
+
+    if args.json_output is not None:
+        args.json_output.write_text(json.dumps(summary, indent=2) + "\n")
+
+    if args.json:
+        print(json.dumps(summary, indent=2))
+    else:
+        print()
+        print(f"Database: {database}")
+        print(
+            textwrap.dedent(
+                f"""\
+                Count: {args.count:,}
+                Batch size: {args.batch_size:,}
+                Repeats: {args.repeats:,}
+                Warmups: {args.warmups:,}
+                """
+            ).rstrip()
+        )
+        print()
+        baseline_label = args.baseline_ref
+        candidate_label = args.candidate_ref
+        if baseline_label == candidate_label:
+            baseline_label = f"baseline {baseline_label}"
+            candidate_label = f"candidate {candidate_label}"
+        print_table(
+            cases,
+            baseline_label,
+            candidate_label,
+            results["baseline"],
+            results["candidate"],
+        )
+
+    if summary["regressions"]:
+        print("Benchmark regressions exceeded threshold:", file=sys.stderr)
+        for regression in summary["regressions"]:
+            case = regression["case"]
+            if regression.get("reason") == "candidate_unsupported":
+                print(
+                    f"  {case}: candidate does not support this case", file=sys.stderr
+                )
+            else:
+                print(
+                    f"  {case}: {regression['delta_percent']:+.1f}% "
+                    f"(threshold -{regression['max_regression_pct']:.1f}%)",
+                    file=sys.stderr,
+                )
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
