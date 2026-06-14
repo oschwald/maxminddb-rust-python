@@ -456,7 +456,7 @@ class BaseTestReader(unittest.TestCase):
         metadata = reader.metadata()
         with self.assertRaisesRegex(
             AttributeError,
-            r"'(maxminddb(_rust)?\.extension\.)?Metadata' object has no attribute 'blah'",
+            r"'((maxminddb(_rust)?\.)?(extension\.)?)?Metadata' object has no attribute 'blah'",
         ):
             metadata.blah  # type:  ignore[attr-defined]  # noqa: B018
         reader.close()
