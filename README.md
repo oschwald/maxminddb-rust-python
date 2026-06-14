@@ -220,7 +220,7 @@ uv run python benchmarks/benchmark_comprehensive.py --count 250000
 # Batch lookup benchmark
 uv run python benchmarks/benchmark_batch.py --file /var/lib/GeoIP/GeoIP2-City.mmdb --batch-size 100
 
-# Parallel lookup benchmark (shared Reader across threads, default DB set)
+# Threaded lookup benchmark (shared Reader across Python threads, default DB set)
 uv run python benchmarks/benchmark_parallel.py --count 500000 --workers 1,2,4,8
 
 # get() vs get_path() benchmark
