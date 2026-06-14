@@ -52,6 +52,7 @@ def main() -> None:
     ips = generate_ips(args.count)
     batches = chunks(ips, args.batch_size)
     path = ("country", "iso_code")
+    path_items = ["country", "iso_code"]
 
     if args.case == "get":
 
@@ -78,6 +79,26 @@ def main() -> None:
         def run_once() -> int:
             for ip in ips:
                 reader.get_path(ip, path)
+            return len(ips)
+
+    elif args.case == "get_path_new_tuple":
+        if not hasattr(reader, "get_path"):
+            print(json.dumps({"supported": False}))
+            return
+
+        def run_once() -> int:
+            for ip in ips:
+                reader.get_path(ip, tuple(path_items))
+            return len(ips)
+
+    elif args.case == "get_path_list":
+        if not hasattr(reader, "get_path"):
+            print(json.dumps({"supported": False}))
+            return
+
+        def run_once() -> int:
+            for ip in ips:
+                reader.get_path(ip, path_items)
             return len(ips)
 
     elif args.case == "get_many_path":
@@ -136,6 +157,7 @@ if __name__ == "__main__":
 
 
 DEFAULT_CASES = ("get", "get_many", "get_path", "get_many_path", "iterate")
+ALL_CASES = (*DEFAULT_CASES, "get_path_new_tuple", "get_path_list")
 
 
 def run_command(
@@ -362,7 +384,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--case",
         action="append",
-        choices=DEFAULT_CASES,
+        choices=ALL_CASES,
         help="benchmark case to run; may be specified more than once",
     )
     parser.add_argument("--keep-worktrees", action="store_true")
