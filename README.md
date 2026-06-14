@@ -234,6 +234,9 @@ uv run python benchmarks/benchmark_parallel.py --count 500000 --workers 1,2,4,8
 
 # get() vs get_path() benchmark
 uv run python benchmarks/benchmark_path.py --file /var/lib/GeoIP/GeoLite2-City.mmdb --count 250000
+
+# Compare benchmark throughput between two git refs
+uv run python benchmarks/compare_refs.py --baseline-ref origin/main --candidate-ref HEAD
 ```
 
 ## Testing
