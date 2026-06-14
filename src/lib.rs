@@ -1322,7 +1322,10 @@ fn open_database_memory(path: &str) -> PyResult<Reader> {
     Ok(create_reader(ReaderSource::Memory(reader)))
 }
 
-/// Open a MaxMind DB from a file-like object's current position (MODE_FD)
+/// Open a MaxMind DB from a file-like object's current position (MODE_FD).
+///
+/// This mirrors the official package's pure Python reader behavior: the object
+/// must provide `read()`. Raw integer OS file descriptors are not accepted.
 fn open_database_fd(database: &Bound<'_, PyAny>) -> PyResult<Reader> {
     let filename = fd_database_name(database)?;
     let buffer = database.call_method0("read")?.extract::<Vec<u8>>()?;
@@ -1347,6 +1350,7 @@ fn fd_database_name(database: &Bound<'_, PyAny>) -> PyResult<String> {
 ///
 /// Args:
 ///     database: Path to the MaxMind DB file, or a readable binary object for MODE_FD.
+///         Raw integer OS file descriptors are not accepted.
 ///     mode: The mode to use when opening the database. Defaults to MODE_AUTO.
 ///         Available modes:
 ///         - MODE_AUTO (0): Automatically choose the best mode (uses MODE_MMAP)

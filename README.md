@@ -178,6 +178,10 @@ with open("/var/lib/GeoIP/GeoIP2-City.mmdb", "rb") as database:
     reader = maxminddb_rust.open_database(database, mode=maxminddb_rust.MODE_FD)
 ```
 
+`MODE_FD` follows the official package's pure Python behavior: pass a readable
+binary object and the reader calls `read()` from its current position. Raw
+integer OS file descriptors are not accepted directly.
+
 ## Examples
 
 The `examples/` directory contains complete working examples:

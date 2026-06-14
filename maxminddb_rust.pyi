@@ -95,7 +95,8 @@ class Reader:
         Initialize a Reader for a MaxMind DB file.
 
         Args:
-            database: Path to the MaxMind DB file, or a readable binary object for MODE_FD.
+            database: Path to the MaxMind DB file, or a readable binary object
+                for MODE_FD. Raw integer OS file descriptors are not accepted.
             mode: The mode to use when opening the database. Defaults to MODE_AUTO.
 
         Raises:
@@ -300,7 +301,8 @@ def open_database(
     Open a MaxMind DB database file.
 
     Args:
-        database: Path to the MaxMind DB file, or a readable binary object for MODE_FD.
+        database: Path to the MaxMind DB file, or a readable binary object for
+            MODE_FD. Raw integer OS file descriptors are not accepted.
         mode: The mode to use when opening the database. Defaults to MODE_AUTO.
             Available modes:
             - MODE_AUTO (0): Automatically choose the best mode (uses MODE_MMAP)

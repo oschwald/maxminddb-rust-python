@@ -122,7 +122,7 @@ import maxminddb       # Use official implementation (if still needed)
 
 ### Mode Notes
 
-`MODE_FD` is supported for readable file-like objects, matching the official package's pure Python reader behavior. It reads from the object's current position and implies `MODE_MEMORY`.
+`MODE_FD` is supported for readable binary objects, matching the official package's pure Python reader behavior. It reads from the object's current position and implies `MODE_MEMORY`. Raw integer OS file descriptors are not accepted directly.
 
 ## Example Migration
 
