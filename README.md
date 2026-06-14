@@ -48,10 +48,6 @@ Extensions (not in the original package):
   `('country', 'iso_code')`) without decoding the entire record
 - `get_many_path()` for retrieving a specific field for many IP addresses
 
-Not yet implemented:
-
-- File descriptor support in constructor
-
 ## Installation
 
 ### From PyPI
@@ -176,6 +172,10 @@ reader = maxminddb_rust.open_database(
 reader = maxminddb_rust.open_database(
     "/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb_rust.MODE_FILE
 )
+
+# MODE_FD: Read from a file-like object into memory
+with open("/var/lib/GeoIP/GeoIP2-City.mmdb", "rb") as database:
+    reader = maxminddb_rust.open_database(database, mode=maxminddb_rust.MODE_FD)
 ```
 
 ## Examples

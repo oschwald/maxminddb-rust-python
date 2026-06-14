@@ -267,8 +267,6 @@ const MODE_FD: i32 = 16;
 const ERR_CLOSED_DB: &str = "Attempt to read from a closed MaxMind DB.";
 const ERR_BAD_DATA: &str =
     "The MaxMind DB file's data section contains bad data (unknown data type or corrupt data)";
-const ERR_UNSUPPORTED_FD_MODE: &str =
-    "MODE_FD not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY";
 const ERR_BAD_DATABASE_ARG: &str = "database must be a string, PathLike, or file descriptor";
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -488,7 +486,7 @@ impl Metadata {
 }
 
 /// A Python wrapper around the MaxMind DB reader.
-/// Supports memory-mapped files (MODE_MMAP) and read-file modes (MODE_FILE/MODE_MEMORY).
+/// Supports memory-mapped files (MODE_MMAP) and read-file modes (MODE_FILE/MODE_MEMORY/MODE_FD).
 #[pyclass(module = "maxminddb_rust")]
 struct Reader {
     reader: ArcSwapOption<ReaderSource>,
@@ -915,7 +913,7 @@ impl Reader {
                 let path = Self::extract_database_path(database)?;
                 open_database_memory(&path)
             }
-            OpenMode::Fd => Err(PyValueError::new_err(ERR_UNSUPPORTED_FD_MODE)),
+            OpenMode::Fd => open_database_fd(database),
         }
     }
 
@@ -1307,10 +1305,31 @@ fn open_database_memory(path: &str) -> PyResult<Reader> {
     Ok(create_reader(ReaderSource::Memory(reader)))
 }
 
+/// Open a MaxMind DB from a file-like object's current position (MODE_FD)
+fn open_database_fd(database: &Bound<'_, PyAny>) -> PyResult<Reader> {
+    let filename = fd_database_name(database)?;
+    let buffer = database.call_method0("read")?.extract::<Vec<u8>>()?;
+    let py = database.py();
+    let reader = py.detach(move || reader_from_source(&filename, buffer))?;
+
+    Ok(create_reader(ReaderSource::Memory(reader)))
+}
+
+fn fd_database_name(database: &Bound<'_, PyAny>) -> PyResult<String> {
+    if let Ok(name) = database.getattr("name") {
+        if let Ok(name) = name.extract::<String>() {
+            return Ok(name);
+        }
+    }
+
+    let type_repr = database.get_type().repr()?.extract::<String>()?;
+    Ok(format!("<{type_repr}>"))
+}
+
 /// Open a MaxMind DB database file.
 ///
 /// Args:
-///     database: Path to the MaxMind DB file. Can be a string or PathLike object.
+///     database: Path to the MaxMind DB file, or a readable binary object for MODE_FD.
 ///     mode: The mode to use when opening the database. Defaults to MODE_AUTO.
 ///         Available modes:
 ///         - MODE_AUTO (0): Automatically choose the best mode (uses MODE_MMAP)
@@ -1318,7 +1337,7 @@ fn open_database_memory(path: &str) -> PyResult<Reader> {
 ///         - MODE_MMAP_EXT (1): Same as MODE_MMAP
 ///         - MODE_FILE (4): Read the database file into memory
 ///         - MODE_MEMORY (8): Load entire database into memory
-///         - MODE_FD (16): Not yet supported
+///         - MODE_FD (16): Read bytes from a file-like object into memory
 ///
 /// Returns:
 ///     A Reader object that can be used to query the database.

@@ -8,7 +8,7 @@ This guide explains how to migrate from the official `maxminddb` package to `max
 
 - **45% faster** on average (373K vs 257K lookups/second)
 - Same API, just better performance
-- All features supported except MODE_FD
+- All open modes supported
 - Additional `get_many()` method for batch lookups
 
 ## Quick Migration
@@ -120,13 +120,9 @@ import maxminddb       # Use official implementation (if still needed)
 
 - `get_many()` - Batch IP lookup method (not in official package)
 
-### Not Yet Implemented
+### Mode Notes
 
-⏸️ These modes are not yet supported in `maxminddb-rust`:
-
-- MODE_FD (file descriptor mode)
-
-If you use MODE_FD, you'll need to update your code to use MODE_MMAP, MODE_FILE, or MODE_MEMORY.
+`MODE_FD` is supported for readable file-like objects, matching the official package's pure Python reader behavior. It reads from the object's current position and implies `MODE_MEMORY`.
 
 ## Example Migration
 
@@ -239,7 +235,7 @@ import maxminddb  # Official package
 | API compatibility | N/A                | 100%                    |
 | get_many()        | ❌                 | ✅                      |
 | MODE_FILE         | ✅                 | ✅                      |
-| MODE_FD           | ✅                 | ❌ (not yet)            |
+| MODE_FD           | ✅                 | ✅                      |
 | Maintained by     | MaxMind (official) | Community (unofficial)  |
 
 ## FAQ

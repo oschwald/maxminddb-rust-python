@@ -8,7 +8,7 @@ implemented in Rust using PyO3 with 100% API compatibility.
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 from os import PathLike
 from types import TracebackType
-from typing import Any, Iterable, Iterator, Literal, Optional, Sequence, Union
+from typing import Any, BinaryIO, Iterable, Iterator, Literal, Optional, Sequence, Union
 
 __all__ = [
     "Reader",
@@ -85,17 +85,17 @@ class Reader:
     A MaxMind DB database reader.
 
     Provides methods to query IP address information from MaxMind DB files.
-    Supports memory-mapped files (MODE_MMAP) and read-file modes (MODE_FILE/MODE_MEMORY).
+    Supports memory-mapped files (MODE_MMAP) and read-file modes (MODE_FILE/MODE_MEMORY/MODE_FD).
     """
 
     def __init__(
-        self, database: Union[str, PathLike[str]], mode: int = MODE_AUTO
+        self, database: Union[str, PathLike[str], BinaryIO], mode: int = MODE_AUTO
     ) -> None:
         """
         Initialize a Reader for a MaxMind DB file.
 
         Args:
-            database: Path to the MaxMind DB file.
+            database: Path to the MaxMind DB file, or a readable binary object for MODE_FD.
             mode: The mode to use when opening the database. Defaults to MODE_AUTO.
 
         Raises:
@@ -293,12 +293,14 @@ class Reader:
         """
         ...
 
-def open_database(database: Union[str, PathLike[str]], mode: int = MODE_AUTO) -> Reader:
+def open_database(
+    database: Union[str, PathLike[str], BinaryIO], mode: int = MODE_AUTO
+) -> Reader:
     """
     Open a MaxMind DB database file.
 
     Args:
-        database: Path to the MaxMind DB file. Can be a string or PathLike object.
+        database: Path to the MaxMind DB file, or a readable binary object for MODE_FD.
         mode: The mode to use when opening the database. Defaults to MODE_AUTO.
             Available modes:
             - MODE_AUTO (0): Automatically choose the best mode (uses MODE_MMAP)
@@ -306,7 +308,7 @@ def open_database(database: Union[str, PathLike[str]], mode: int = MODE_AUTO) ->
             - MODE_MMAP_EXT (1): Same as MODE_MMAP
             - MODE_FILE (4): Read the database file into memory
             - MODE_MEMORY (8): Load entire database into memory
-            - MODE_FD (16): Not yet supported
+            - MODE_FD (16): Read bytes from a file-like object into memory
 
     Returns:
         A Reader object that can be used to query the database.

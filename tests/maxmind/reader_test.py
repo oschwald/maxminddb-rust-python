@@ -18,8 +18,6 @@ import unittest
 from typing import TYPE_CHECKING, cast
 from unittest import mock
 
-import pytest
-
 import maxminddb_rust as maxminddb
 
 try:
@@ -538,7 +536,6 @@ class BaseTestReader(unittest.TestCase):
         else:
             self.assertIsNotNone(metadata, "pure Python implementation returns value")
 
-    @unittest.skip("MODE_FD not supported in Rust implementation")
     def test_reading_from_buffer(self) -> None:
         filename = "tests/data/test-data/MaxMind-DB-test-ipv4-24.mmdb"
         with open(filename, "rb") as f:
@@ -724,7 +721,6 @@ class TestMemoryReader(BaseTestReader):
     reader_class = maxminddb.Reader
 
 
-@pytest.mark.skip(reason="MODE_FD not yet supported in maxminddb-rust")
 class TestFDReader(BaseTestReader):
     def setUp(self) -> None:
         self.open_database_patcher = mock.patch(__name__ + ".open_database")

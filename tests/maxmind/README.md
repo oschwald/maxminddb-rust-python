@@ -89,21 +89,9 @@ if TYPE_CHECKING:
     from maxminddb import Reader  # Uses the alias from above
 ```
 
-**Add pytest import:**
+#### c. Verify Mode Coverage
 
-```python
-import pytest
-```
-
-#### c. Skip Unsupported Test Classes
-
-Add skip markers for test classes that rely on unimplemented features:
-
-```python
-@pytest.mark.skip(reason="MODE_FD not yet supported in maxminddb-rust")
-class TestFDReader(BaseTestReader):
-    ...
-```
+The adapted upstream tests should exercise each supported open mode, including `MODE_FD`.
 
 #### d. Verify Test Data Paths
 
