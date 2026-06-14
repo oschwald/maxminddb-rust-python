@@ -52,6 +52,8 @@ jobs:
       - name: Set up Zig
         if: runner.os == 'Windows'
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          use-cache: false
 
       - name: Set up QEMU
         if: runner.os == 'Linux' && matrix.target == 'aarch64'
@@ -64,7 +66,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
           args: --release --out dist --interpreter ${{ matrix.python_versions || '3.9 3.10 3.11 3.12 3.13 3.14' }}
-          sccache: "true"
+          sccache: "false"
           manylinux: auto
 
       - name: Upload wheels
@@ -93,9 +95,49 @@ jobs:
           name: maxminddb-rust-sdist
           path: dist
 
+  build_wasm_wheels:
+    name: Build Pyodide wheels
+    runs-on: ubuntu-latest
+    env:
+      CIBW_BUILD: cp314-pyodide_wasm32
+      CIBW_DEPENDENCY_VERSIONS_PYODIDE: "packages: pyodide-build==0.35.0"
+      CIBW_ENVIRONMENT: CARGO_PROFILE_RELEASE_PANIC=abort
+      CIBW_PLATFORM: pyodide
+      CIBW_PYODIDE_VERSION: "314.0.0"
+      CIBW_TEST_COMMAND: >-
+        python -c "import maxminddb_rust; reader =
+        maxminddb_rust.open_database('{project}/tests/data/test-data/GeoIP2-City-Test.mmdb');
+        assert reader.get('81.2.69.160')['country']['iso_code'] == 'GB'"
+      RUSTUP_TOOLCHAIN: "1.93.0"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.x"
+
+      - name: Set up Rust for Pyodide
+        run: |
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" \
+            --profile minimal \
+            --target wasm32-unknown-emscripten
+
+      - name: Build and test Pyodide wheel
+        uses: pypa/cibuildwheel@294735312765b09d24a2fbec22660ce817587d55 # v4.1.0
+
+      - name: Upload Pyodide wheels
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: maxminddb-rust-whl-pyodide-wasm32
+          path: wheelhouse/*.whl
+
   upload_pypi:
     name: Publish to PyPI
-    needs: [build_wheels, build_sdist]
+    needs: [build_wheels, build_sdist, build_wasm_wheels]
     runs-on: ubuntu-latest
     if: github.event_name == 'release' && github.event.action == 'published'
     environment: pypi

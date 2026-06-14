@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a `benchmarks/compare_refs.py` helper and manual GitHub Actions
   workflow for comparing benchmark results between git refs.
 - Added reader concurrency stress tests.
+- Added release workflow support for CPython 3.14 Pyodide/WebAssembly wheels
+  using the `pyemscripten_2026_0_wasm32` platform tag.
 
 ### Changed
 
