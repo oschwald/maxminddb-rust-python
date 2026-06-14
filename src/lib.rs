@@ -502,9 +502,8 @@ impl Reader {
     #[new]
     #[pyo3(signature = (database, mode=MODE_AUTO))]
     fn new(database: &Bound<'_, PyAny>, mode: i32) -> PyResult<Self> {
-        let path = Self::extract_database_path(database)?;
         let open_mode = Self::resolve_open_mode(mode)?;
-        Self::open_reader_from_mode(&path, open_mode)
+        Self::open_reader_from_mode(database, open_mode)
     }
 
     /// Check if the database has been closed.
@@ -856,10 +855,16 @@ impl Reader {
         OpenMode::try_from(mode)
     }
 
-    fn open_reader_from_mode(path: &str, mode: OpenMode) -> PyResult<Self> {
+    fn open_reader_from_mode(database: &Bound<'_, PyAny>, mode: OpenMode) -> PyResult<Self> {
         match mode {
-            OpenMode::Mmap | OpenMode::MmapExt => open_database_mmap(path),
-            OpenMode::Memory => open_database_memory(path),
+            OpenMode::Mmap | OpenMode::MmapExt => {
+                let path = Self::extract_database_path(database)?;
+                open_database_mmap(&path)
+            }
+            OpenMode::Memory => {
+                let path = Self::extract_database_path(database)?;
+                open_database_memory(&path)
+            }
             OpenMode::File => Err(PyValueError::new_err(ERR_UNSUPPORTED_FILE_MODE)),
             OpenMode::Fd => Err(PyValueError::new_err(ERR_UNSUPPORTED_FD_MODE)),
         }
