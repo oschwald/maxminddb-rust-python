@@ -43,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   borrowed `PathElement` slices once per call instead of once per IP lookup.
 - Added a strict fast path for IPv4 string parsing to reduce per-lookup input
   parsing overhead.
+- Reduced batch lookup iteration overhead by fast-pathing list and tuple inputs
+  for `get_many()` and `get_many_path()`.
 - Reduced lookup synchronization overhead by replacing the hot-path
   `RwLock<Option<Arc<_>>>` reader access with `ArcSwapOption` and borrowing the
   loaded reader for single-lookups instead of cloning an `Arc` every time.
