@@ -7,8 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `MODE_FILE` and `MODE_FD` support. `MODE_FD` accepts readable binary
+  file-like objects and reads from their current position.
+- Added `Reader.get_many_path()` for batched lookups of a specific record path.
+- Added a `benchmarks/compare_refs.py` helper and manual GitHub Actions
+  workflow for comparing benchmark results between git refs.
+- Added reader concurrency stress tests.
+- Added release workflow support for CPython 3.14 Pyodide/WebAssembly wheels
+  using the `pyemscripten_2026_0_wasm32` platform tag.
+
+### Changed
+
+- Updated dependencies, including PyO3 0.29.0 and maxminddb 0.28.1.
+- Removed the now-unnecessary PyO3 `generate-import-lib` feature; PyO3 0.29
+  uses raw-dylib linking on Windows.
+- `Reader.get_many()` now accepts any iterable of IP addresses instead of
+  requiring a pre-built sequence, while preserving output order.
+- Expanded type hints for decoded record values and IP address inputs.
+- Runtime classes and exceptions now report the public `maxminddb_rust` module.
+- Refreshed migration and benchmark guidance to avoid relying on stale
+  throughput claims.
+
+### Fixed
+
+- Reworked reader iteration internals to avoid an unsafe lifetime transmute.
+- Tightened path parsing so invalid path element types, including `bool`, are
+  rejected consistently.
+- Report unsupported open modes before validating the database argument.
+
 ### Performance
 
+- Added path-cache and iterator cases to the ref-comparison benchmarks, with
+  configurable regression thresholds and JSON output.
+- Pre-generated benchmark input IP addresses to reduce benchmark harness
+  overhead.
+- Reduced `get_many_path()` overhead by converting parsed lookup paths to
+  borrowed `PathElement` slices once per call instead of once per IP lookup.
+- Added a strict fast path for IPv4 string parsing to reduce per-lookup input
+  parsing overhead.
+- Reduced batch lookup iteration overhead by fast-pathing list and tuple inputs
+  for `get_many()` and `get_many_path()`.
 - Reduced lookup synchronization overhead by replacing the hot-path
   `RwLock<Option<Arc<_>>>` reader access with `ArcSwapOption` and borrowing the
   loaded reader for single-lookups instead of cloning an `Arc` every time.

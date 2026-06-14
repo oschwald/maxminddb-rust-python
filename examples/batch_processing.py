@@ -4,8 +4,8 @@ Batch processing example for maxminddb_rust module.
 
 Demonstrates the use of the get_many() extension method for efficient
 batch IP lookups. This method is significantly faster than calling get()
-repeatedly, as it reduces Python call overhead and releases the GIL
-during the entire batch operation.
+repeatedly, as it reduces Python call overhead. It keeps the GIL during
+the batch operation.
 
 Note: get_many() is an extension method not available in the official
 maxminddb package.
@@ -227,7 +227,7 @@ def chunked_batch_processing():
 
 def main():
     """Run all batch processing examples."""
-    print("MaxMindDB Batch Processing Examples")
+    print("MaxMind DB Batch Processing Examples")
     print("=" * 60)
 
     basic_batch_lookup()

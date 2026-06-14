@@ -4,11 +4,11 @@ This guide explains how to migrate from the official `maxminddb` package to `max
 
 ## Why Migrate?
 
-`maxminddb-rust` offers significant performance improvements over the official `maxminddb` package:
+`maxminddb-rust` can offer significant performance improvements over the official `maxminddb` package:
 
-- **45% faster** on average (373K vs 257K lookups/second)
+- Benchmarkable Rust-backed lookup performance
 - Same API, just better performance
-- All features supported (except MODE_FILE and MODE_FD)
+- All open modes supported
 - Additional `get_many()` method for batch lookups
 
 ## Quick Migration
@@ -110,7 +110,8 @@ import maxminddb       # Use official implementation (if still needed)
 - Context manager support (`with` statement)
 - Iterator support (iterating over all networks)
 - `Metadata` class and all properties
-- MODE_AUTO, MODE_MMAP, MODE_MMAP_EXT, MODE_MEMORY constants
+- MODE_AUTO, MODE_MMAP, MODE_MMAP_EXT, MODE_FILE, MODE_MEMORY, MODE_FD
+  constants
 - `InvalidDatabaseError` exception
 - String and ipaddress object support
 
@@ -120,14 +121,14 @@ import maxminddb       # Use official implementation (if still needed)
 
 - `get_many()` - Batch IP lookup method (not in official package)
 
-### Not Yet Implemented
+### Mode Notes
 
-⏸️ These modes are not yet supported in `maxminddb-rust`:
+`MODE_FD` is supported for readable binary objects, matching the official package's pure Python reader behavior. It reads from the object's current position and implies `MODE_MEMORY`. Raw integer OS file descriptors are not accepted directly.
 
-- MODE_FILE (use MODE_MMAP or MODE_MEMORY instead)
-- MODE_FD (file descriptor mode)
-
-If you use these modes, you'll need to update your code to use MODE_MMAP or MODE_MEMORY.
+`MODE_AUTO` currently resolves to `MODE_MMAP`. `MODE_MMAP_EXT` is accepted for
+compatibility with the official package, but `maxminddb-rust` does not have a
+separate C extension backend; it uses the same Rust memory-mapped reader as
+`MODE_MMAP`.
 
 ## Example Migration
 
@@ -169,12 +170,15 @@ def lookup():
 
 ## Performance Comparison
 
-After migration, you should see performance improvements:
+Performance depends on the database, lookup pattern, Python version, and hardware. Run the benchmarks against your own workload before relying on a specific throughput number:
 
-| Operation        | Official maxminddb | maxminddb-rust | Improvement |
-| ---------------- | ------------------ | -------------- | ----------- |
-| Single lookup    | ~260K ops/sec      | ~373K ops/sec  | +45%        |
-| Batch (get_many) | N/A                | ~500K+ ops/sec | New feature |
+```bash
+uv run python benchmarks/benchmark.py --file /path/to/GeoIP2-City.mmdb --count 250000
+uv run python benchmarks/benchmark_batch.py --file /path/to/GeoIP2-City.mmdb --batch-size 100
+uv run python benchmarks/compare_refs.py --baseline-ref origin/main --candidate-ref HEAD
+```
+
+`get_many()` is an extension that the official package does not provide, so compare it against your current loop of `get()` calls when evaluating a migration.
 
 ## Troubleshooting
 
@@ -235,12 +239,12 @@ import maxminddb  # Official package
 | ----------------- | ------------------ | ----------------------- |
 | Package name      | `maxminddb`        | `maxminddb-rust`        |
 | Import name       | `import maxminddb` | `import maxminddb_rust` |
-| Performance       | Baseline           | 45% faster              |
+| Performance       | Baseline           | Measure with benchmarks |
 | Implementation    | Pure Python + C    | Rust (PyO3)             |
 | API compatibility | N/A                | 100%                    |
 | get_many()        | ❌                 | ✅                      |
-| MODE_FILE         | ✅                 | ❌ (use MODE_MMAP)      |
-| MODE_FD           | ✅                 | ❌ (not yet)            |
+| MODE_FILE         | ✅                 | ✅                      |
+| MODE_FD           | ✅                 | ✅                      |
 | Maintained by     | MaxMind (official) | Community (unofficial)  |
 
 ## FAQ

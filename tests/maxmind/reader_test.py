@@ -18,8 +18,6 @@ import unittest
 from typing import TYPE_CHECKING, cast
 from unittest import mock
 
-import pytest
-
 import maxminddb_rust as maxminddb
 
 try:
@@ -39,7 +37,7 @@ from maxminddb_rust import (
 )
 
 if TYPE_CHECKING:
-    from maxminddb import Reader
+    from maxminddb_rust import Reader
 
 
 def get_reader_from_file_descriptor(filepath: str, mode: int) -> Reader:
@@ -456,7 +454,7 @@ class BaseTestReader(unittest.TestCase):
         metadata = reader.metadata()
         with self.assertRaisesRegex(
             AttributeError,
-            r"'(maxminddb(_rust)?\.extension\.)?Metadata' object has no attribute 'blah'",
+            r"'((maxminddb(_rust)?\.)?(extension\.)?)?Metadata' object has no attribute 'blah'",
         ):
             metadata.blah  # type:  ignore[attr-defined]  # noqa: B018
         reader.close()
@@ -538,7 +536,6 @@ class BaseTestReader(unittest.TestCase):
         else:
             self.assertIsNotNone(metadata, "pure Python implementation returns value")
 
-    @unittest.skip("MODE_FD not supported in Rust implementation")
     def test_reading_from_buffer(self) -> None:
         filename = "tests/data/test-data/MaxMind-DB-test-ipv4-24.mmdb"
         with open(filename, "rb") as f:
@@ -714,7 +711,6 @@ class TestMMAPReaderWithIPObjects(BaseTestReader):
     reader_class = maxminddb.Reader
 
 
-@pytest.mark.skip(reason="MODE_FILE not yet supported in maxminddb-rust")
 class TestFileReader(BaseTestReader):
     mode = MODE_FILE
     reader_class = maxminddb.Reader
@@ -725,7 +721,6 @@ class TestMemoryReader(BaseTestReader):
     reader_class = maxminddb.Reader
 
 
-@pytest.mark.skip(reason="MODE_FD not yet supported in maxminddb-rust")
 class TestFDReader(BaseTestReader):
     def setUp(self) -> None:
         self.open_database_patcher = mock.patch(__name__ + ".open_database")

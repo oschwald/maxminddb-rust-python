@@ -1,0 +1,79 @@
+name: Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline-ref:
+        description: Git ref to compare against
+        required: true
+        default: origin/main
+      candidate-ref:
+        description: Git ref to benchmark as the candidate
+        required: true
+        default: HEAD
+      count:
+        description: Number of operations per benchmark sample
+        required: true
+        default: "1000000"
+      repeats:
+        description: Number of measured samples
+        required: true
+        default: "11"
+      warmups:
+        description: Number of warmup samples
+        required: true
+        default: "2"
+      max-regression-pct:
+        description: Maximum allowed median regression percentage
+        required: true
+        default: "5"
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: Compare refs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
+        with:
+          toolchain: stable
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+
+      - name: Run benchmark comparison
+        env:
+          BASELINE_REF: ${{ inputs.baseline-ref }}
+          CANDIDATE_REF: ${{ inputs.candidate-ref }}
+          COUNT: ${{ inputs.count }}
+          MAX_REGRESSION_PCT: ${{ inputs.max-regression-pct }}
+          REPEATS: ${{ inputs.repeats }}
+          WARMUPS: ${{ inputs.warmups }}
+        run: |
+          uv run python benchmarks/compare_refs.py \
+            --baseline-ref "$BASELINE_REF" \
+            --candidate-ref "$CANDIDATE_REF" \
+            --count "$COUNT" \
+            --repeats "$REPEATS" \
+            --warmups "$WARMUPS" \
+            --max-regression-pct "$MAX_REGRESSION_PCT" \
+            --json-output benchmark-results.json
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: benchmark-results
+          path: benchmark-results.json
+          if-no-files-found: ignore

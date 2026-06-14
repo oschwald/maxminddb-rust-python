@@ -121,7 +121,7 @@ def context_manager_with_different_modes():
 
 def main():
     """Run all context manager examples."""
-    print("MaxMindDB Context Manager Examples")
+    print("MaxMind DB Context Manager Examples")
     print("=" * 60)
 
     basic_context_manager()

@@ -8,7 +8,7 @@ implemented in Rust using PyO3 with 100% API compatibility.
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 from os import PathLike
 from types import TracebackType
-from typing import Any, Iterator, Literal, Optional, Sequence, Union
+from typing import Any, BinaryIO, Iterable, Iterator, Literal, Optional, Sequence, Union
 
 __all__ = [
     "Reader",
@@ -85,17 +85,21 @@ class Reader:
     A MaxMind DB database reader.
 
     Provides methods to query IP address information from MaxMind DB files.
-    Supports both memory-mapped files (MODE_MMAP) and in-memory (MODE_MEMORY) modes.
+    Supports memory-mapped files (MODE_AUTO/MODE_MMAP/MODE_MMAP_EXT) and
+    read-file modes (MODE_FILE/MODE_MEMORY/MODE_FD). MODE_AUTO currently
+    resolves to MODE_MMAP, and MODE_MMAP_EXT uses the same Rust memory-mapped
+    reader as MODE_MMAP.
     """
 
     def __init__(
-        self, database: Union[str, PathLike[str]], mode: int = MODE_AUTO
+        self, database: Union[str, PathLike[str], BinaryIO], mode: int = MODE_AUTO
     ) -> None:
         """
         Initialize a Reader for a MaxMind DB file.
 
         Args:
-            database: Path to the MaxMind DB file.
+            database: Path to the MaxMind DB file, or a readable binary object
+                for MODE_FD. Raw integer OS file descriptors are not accepted.
             mode: The mode to use when opening the database. Defaults to MODE_AUTO.
 
         Raises:
@@ -111,9 +115,7 @@ class Reader:
         """True if the database has been closed, False otherwise."""
         ...
 
-    def get(
-        self, ip_address: Union[str, IPv4Address, IPv6Address]
-    ) -> Optional[dict[str, Any]]:
+    def get(self, ip_address: Union[str, IPv4Address, IPv6Address]) -> Optional[Any]:
         """
         Query the database for information about an IP address.
 
@@ -122,8 +124,8 @@ class Reader:
                 or an ipaddress.IPv4Address or ipaddress.IPv6Address object.
 
         Returns:
-            A dictionary containing the database record for the IP address, or None
-            if the address is not in the database.
+            The database record value for the IP address, or None if the address
+            is not in the database.
 
         Raises:
             ValueError: If the database has been closed or the IP address is invalid.
@@ -133,7 +135,7 @@ class Reader:
 
     def get_with_prefix_len(
         self, ip_address: Union[str, IPv4Address, IPv6Address]
-    ) -> tuple[Optional[dict[str, Any]], int]:
+    ) -> tuple[Optional[Any], int]:
         """
         Query the database for information about an IP address and return the network prefix length.
 
@@ -142,8 +144,8 @@ class Reader:
                 or an ipaddress.IPv4Address or ipaddress.IPv6Address object.
 
         Returns:
-            A tuple of (record, prefix_length) where record is a dictionary containing
-            the database record (or None if not found), and prefix_length is an integer
+            A tuple of (record, prefix_length) where record is the database
+            record value (or None if not found), and prefix_length is an integer
             representing the network prefix length associated with the record.
 
         Raises:
@@ -178,21 +180,51 @@ class Reader:
         """
         ...
 
-    def get_many(self, ips: list[str]) -> list[Optional[dict[str, Any]]]:
+    def get_many(
+        self, ips: Iterable[Union[str, IPv4Address, IPv6Address]]
+    ) -> list[Optional[Any]]:
         """
         Query the database for multiple IP addresses in a single batch operation.
 
         This is an extension method not available in the original maxminddb module.
         It provides better performance than calling get() repeatedly by reducing
-        call overhead and releasing the GIL during the entire batch operation.
+        call overhead. This method keeps the GIL for the duration of the batch.
 
         Args:
-            ips: A list of IP address strings to look up (e.g., ['1.2.3.4', '8.8.8.8']).
+            ips: An iterable of IP address strings or ipaddress objects to look up
+                (e.g., ['1.2.3.4', '8.8.8.8']).
 
         Returns:
-            A list of dictionaries containing database records for each IP address.
+            A list of database record values for each IP address.
             Elements will be None for IP addresses not found in the database.
             The order of results matches the order of input IPs.
+
+        Raises:
+            ValueError: If the database has been closed or any IP address is invalid.
+            InvalidDatabaseError: If the database data is corrupt or invalid.
+        """
+        ...
+
+    def get_many_path(
+        self,
+        ips: Iterable[Union[str, IPv4Address, IPv6Address]],
+        path: Sequence[Union[str, int]],
+    ) -> list[Optional[Any]]:
+        """
+        Query the database for a specific path for multiple IP addresses.
+
+        This extension combines get_many() batching with get_path() selective
+        decoding. It parses the path once and avoids decoding full records when
+        only one field is needed.
+
+        Args:
+            ips: An iterable of IP address strings or ipaddress objects to look up
+                (e.g., ['1.2.3.4', '8.8.8.8']).
+            path: A sequence of strings or integers representing the path to the data.
+
+        Returns:
+            A list of values at the specified path. Elements will be None for IP
+            addresses or paths not found in the database.
 
         Raises:
             ValueError: If the database has been closed or any IP address is invalid.
@@ -249,7 +281,7 @@ class Reader:
 
     def __iter__(
         self,
-    ) -> Iterator[tuple[Union[IPv4Network, IPv6Network], dict[str, Any]]]:
+    ) -> Iterator[tuple[Union[IPv4Network, IPv6Network], Any]]:
         """
         Iterate over all networks in the database.
 
@@ -265,20 +297,24 @@ class Reader:
         """
         ...
 
-def open_database(database: Union[str, PathLike[str]], mode: int = MODE_AUTO) -> Reader:
+def open_database(
+    database: Union[str, PathLike[str], BinaryIO], mode: int = MODE_AUTO
+) -> Reader:
     """
     Open a MaxMind DB database file.
 
     Args:
-        database: Path to the MaxMind DB file. Can be a string or PathLike object.
+        database: Path to the MaxMind DB file, or a readable binary object for
+            MODE_FD. Raw integer OS file descriptors are not accepted.
         mode: The mode to use when opening the database. Defaults to MODE_AUTO.
             Available modes:
-            - MODE_AUTO (0): Automatically choose the best mode (uses MODE_MMAP)
+            - MODE_AUTO (0): Currently resolves to MODE_MMAP
             - MODE_MMAP (2): Use memory-mapped file I/O (default, best performance)
-            - MODE_MMAP_EXT (1): Same as MODE_MMAP
+            - MODE_MMAP_EXT (1): Compatibility alias for the same Rust mmap
+              reader as MODE_MMAP
+            - MODE_FILE (4): Read the database file into memory
             - MODE_MEMORY (8): Load entire database into memory
-            - MODE_FILE (4): Not yet supported
-            - MODE_FD (16): Not yet supported
+            - MODE_FD (16): Read bytes from a file-like object into memory
 
     Returns:
         A Reader object that can be used to query the database.

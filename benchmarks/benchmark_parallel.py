@@ -27,7 +27,7 @@ def chunk_ranges(total: int, workers: int) -> list[tuple[int, int]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Benchmark maxminddb parallel lookups with shared Reader."
+        description="Benchmark maxminddb threaded lookups with a shared Reader."
     )
     parser.add_argument("--count", default=500000, type=int, help="total lookups")
     parser.add_argument(
@@ -69,8 +69,8 @@ def main() -> None:
         with maxminddb_rust.open_database(database_path) as reader:
 
             def lookup_range(start: int, end: int) -> int:
-                for ip in ips[start:end]:
-                    reader.get(ip)
+                for index in range(start, end):
+                    reader.get(ips[index])
                 return end - start
 
             baseline = None
