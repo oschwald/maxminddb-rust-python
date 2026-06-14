@@ -267,8 +267,6 @@ const MODE_FD: i32 = 16;
 const ERR_CLOSED_DB: &str = "Attempt to read from a closed MaxMind DB.";
 const ERR_BAD_DATA: &str =
     "The MaxMind DB file's data section contains bad data (unknown data type or corrupt data)";
-const ERR_UNSUPPORTED_FILE_MODE: &str =
-    "MODE_FILE not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY";
 const ERR_UNSUPPORTED_FD_MODE: &str =
     "MODE_FD not yet supported, use MODE_MMAP, MODE_MMAP_EXT, or MODE_MEMORY";
 const ERR_BAD_DATABASE_ARG: &str = "database must be a string, PathLike, or file descriptor";
@@ -490,7 +488,7 @@ impl Metadata {
 }
 
 /// A Python wrapper around the MaxMind DB reader.
-/// Supports both memory-mapped files (MODE_MMAP) and in-memory (MODE_MEMORY) modes.
+/// Supports memory-mapped files (MODE_MMAP) and read-file modes (MODE_FILE/MODE_MEMORY).
 #[pyclass(module = "maxminddb_rust")]
 struct Reader {
     reader: ArcSwapOption<ReaderSource>,
@@ -913,11 +911,10 @@ impl Reader {
                 let path = Self::extract_database_path(database)?;
                 open_database_mmap(&path)
             }
-            OpenMode::Memory => {
+            OpenMode::File | OpenMode::Memory => {
                 let path = Self::extract_database_path(database)?;
                 open_database_memory(&path)
             }
-            OpenMode::File => Err(PyValueError::new_err(ERR_UNSUPPORTED_FILE_MODE)),
             OpenMode::Fd => Err(PyValueError::new_err(ERR_UNSUPPORTED_FD_MODE)),
         }
     }
@@ -1319,8 +1316,8 @@ fn open_database_memory(path: &str) -> PyResult<Reader> {
 ///         - MODE_AUTO (0): Automatically choose the best mode (uses MODE_MMAP)
 ///         - MODE_MMAP (2): Use memory-mapped file I/O (default, best performance)
 ///         - MODE_MMAP_EXT (1): Same as MODE_MMAP
+///         - MODE_FILE (4): Read the database file into memory
 ///         - MODE_MEMORY (8): Load entire database into memory
-///         - MODE_FILE (4): Not yet supported
 ///         - MODE_FD (16): Not yet supported
 ///
 /// Returns:

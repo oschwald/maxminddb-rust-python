@@ -714,7 +714,6 @@ class TestMMAPReaderWithIPObjects(BaseTestReader):
     reader_class = maxminddb.Reader
 
 
-@pytest.mark.skip(reason="MODE_FILE not yet supported in maxminddb-rust")
 class TestFileReader(BaseTestReader):
     mode = MODE_FILE
     reader_class = maxminddb.Reader

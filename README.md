@@ -50,7 +50,6 @@ Extensions (not in the original package):
 
 Not yet implemented:
 
-- `MODE_FILE`
 - File descriptor support in constructor
 
 ## Installation
@@ -157,7 +156,7 @@ for network, data in reader:
 
 ### Database Modes
 
-Choose between memory-mapped files (default) and in-memory mode:
+Choose between memory-mapped files (default) and read-file modes:
 
 ```python
 import maxminddb_rust
@@ -171,6 +170,11 @@ reader = maxminddb_rust.open_database("/var/lib/GeoIP/GeoIP2-City.mmdb", mode=ma
 # MODE_MEMORY: Load entire database into memory
 reader = maxminddb_rust.open_database(
     "/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb_rust.MODE_MEMORY
+)
+
+# MODE_FILE: Read the database file into memory
+reader = maxminddb_rust.open_database(
+    "/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb_rust.MODE_FILE
 )
 ```
 

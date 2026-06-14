@@ -100,11 +100,6 @@ import pytest
 Add skip markers for test classes that rely on unimplemented features:
 
 ```python
-@pytest.mark.skip(reason="MODE_FILE not yet supported in maxminddb-rust")
-class TestFileReader(BaseTestReader):
-    mode = MODE_FILE
-    ...
-
 @pytest.mark.skip(reason="MODE_FD not yet supported in maxminddb-rust")
 class TestFDReader(BaseTestReader):
     ...

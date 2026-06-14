@@ -85,7 +85,7 @@ class Reader:
     A MaxMind DB database reader.
 
     Provides methods to query IP address information from MaxMind DB files.
-    Supports both memory-mapped files (MODE_MMAP) and in-memory (MODE_MEMORY) modes.
+    Supports memory-mapped files (MODE_MMAP) and read-file modes (MODE_FILE/MODE_MEMORY).
     """
 
     def __init__(
@@ -304,8 +304,8 @@ def open_database(database: Union[str, PathLike[str]], mode: int = MODE_AUTO) ->
             - MODE_AUTO (0): Automatically choose the best mode (uses MODE_MMAP)
             - MODE_MMAP (2): Use memory-mapped file I/O (default, best performance)
             - MODE_MMAP_EXT (1): Same as MODE_MMAP
+            - MODE_FILE (4): Read the database file into memory
             - MODE_MEMORY (8): Load entire database into memory
-            - MODE_FILE (4): Not yet supported
             - MODE_FD (16): Not yet supported
 
     Returns:
