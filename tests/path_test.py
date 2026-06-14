@@ -1,5 +1,7 @@
 import os
+
 import pytest
+
 import maxminddb_rust
 
 
@@ -64,6 +66,27 @@ def test_get_path_invalid_types():
         # Invalid path argument type (not a sequence)
         with pytest.raises(TypeError, match="Path must be a sequence"):
             reader.get_path(ip, "country")  # type: ignore
+
+
+def test_get_path_rejects_bool_path_element():
+    db_path = os.path.join(
+        os.path.dirname(__file__), "data", "test-data", "MaxMind-DB-test-decoder.mmdb"
+    )
+    with maxminddb_rust.open_database(db_path) as reader:
+        with pytest.raises(
+            TypeError, match="Path elements must be strings or integers"
+        ):
+            reader.get_path("1.1.1.1", ("array", True))
+
+
+def test_get_path_negative_array_indexes():
+    db_path = os.path.join(
+        os.path.dirname(__file__), "data", "test-data", "MaxMind-DB-test-decoder.mmdb"
+    )
+    with maxminddb_rust.open_database(db_path) as reader:
+        assert reader.get_path("1.1.1.1", ("array", -1)) == 3
+        assert reader.get_path("1.1.1.1", ("array", -3)) == 1
+        assert reader.get_path("1.1.1.1", ("array", -4)) is None
 
 
 def test_get_path_closed_db():

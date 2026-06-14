@@ -10,7 +10,7 @@ use pyo3::{
         PyFileNotFoundError, PyIOError, PyOSError, PyRuntimeError, PyTypeError, PyValueError,
     },
     prelude::*,
-    types::{PyByteArray, PyBytes, PyDict, PyList, PyModule, PyString, PyTuple},
+    types::{PyBool, PyByteArray, PyBytes, PyDict, PyInt, PyList, PyModule, PyString, PyTuple},
 };
 use rustc_hash::FxHashMap;
 use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
@@ -303,6 +303,7 @@ impl TryFrom<i32> for OpenMode {
 enum OwnedPathElement {
     Key(String),
     Index(usize),
+    IndexFromEnd(usize),
 }
 
 type CachedPath = (Py<PyTuple>, Arc<Vec<OwnedPathElement>>);
@@ -364,8 +365,8 @@ impl ReaderSource {
             .iter()
             .map(|e| match e {
                 OwnedPathElement::Key(s) => PathElement::Key(s.as_str()),
-
                 OwnedPathElement::Index(i) => PathElement::Index(*i),
+                OwnedPathElement::IndexFromEnd(i) => PathElement::IndexFromEnd(*i),
             })
             .collect();
 
@@ -1116,18 +1117,41 @@ fn parse_path(path: &Bound<'_, PyAny>) -> PyResult<Vec<OwnedPathElement>> {
     let mut owned_path = Vec::new();
     for item in iterator {
         let item = item?;
+        if item.is_instance_of::<PyBool>() {
+            return Err(PyTypeError::new_err(ERR_PATH_ELEMENT));
+        }
         if let Ok(s) = item.extract::<String>() {
             owned_path.push(OwnedPathElement::Key(s));
             continue;
         }
-        if let Ok(i) = item.extract::<usize>() {
-            owned_path.push(OwnedPathElement::Index(i));
-            continue;
+        if item.cast::<PyInt>().is_ok() {
+            if let Ok(i) = item.extract::<isize>() {
+                owned_path.push(signed_index_to_owned_path_element(i));
+                continue;
+            }
+            if let Ok(i) = item.extract::<usize>() {
+                owned_path.push(OwnedPathElement::Index(i));
+                continue;
+            }
         }
         return Err(PyTypeError::new_err(ERR_PATH_ELEMENT));
     }
 
     Ok(owned_path)
+}
+
+#[inline]
+fn signed_index_to_owned_path_element(n: isize) -> OwnedPathElement {
+    if n >= 0 {
+        OwnedPathElement::Index(n as usize)
+    } else {
+        let index = n
+            .checked_neg()
+            .and_then(|n| n.checked_sub(1))
+            .map(|n| n as usize)
+            .unwrap_or(usize::MAX);
+        OwnedPathElement::IndexFromEnd(index)
+    }
 }
 
 /// Helper function to parse IP address from string or ipaddress objects
