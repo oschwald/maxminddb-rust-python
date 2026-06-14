@@ -34,6 +34,16 @@ def test_get_many_path_accepts_ipaddress_objects() -> None:
         assert reader.get_many_path(ips, path) == expected
 
 
+def test_get_many_path_accepts_tuple_input() -> None:
+    with maxminddb_rust.open_database(city_db_path()) as reader:
+        ips = ("81.2.69.142", "2001:2b8::", "1.1.1.1")
+        path = ("country", "iso_code")
+
+        expected = [reader.get_path(ip, path) for ip in ips]
+
+        assert reader.get_many_path(ips, path) == expected
+
+
 def test_get_many_path_rejects_string_instead_of_iterable_of_ips() -> None:
     with maxminddb_rust.open_database(city_db_path()) as reader:
         with pytest.raises(TypeError, match="iterable of strings or ipaddress objects"):

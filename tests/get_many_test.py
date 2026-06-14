@@ -34,6 +34,19 @@ def test_get_many_accepts_ipaddress_objects() -> None:
         assert reader.get_many(ips) == expected
 
 
+def test_get_many_accepts_tuple_input() -> None:
+    db_path = os.path.join(
+        os.path.dirname(__file__), "data", "test-data", "GeoIP2-City-Test.mmdb"
+    )
+
+    with maxminddb_rust.open_database(db_path) as reader:
+        ips = ("81.2.69.142", "2001:2b8::", "1.1.1.1")
+
+        expected = [reader.get(ip) for ip in ips]
+
+        assert reader.get_many(ips) == expected
+
+
 def test_get_many_rejects_string_instead_of_iterable_of_ips() -> None:
     db_path = os.path.join(
         os.path.dirname(__file__), "data", "test-data", "GeoIP2-City-Test.mmdb"

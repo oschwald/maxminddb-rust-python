@@ -10,7 +10,10 @@ use pyo3::{
         PyFileNotFoundError, PyIOError, PyOSError, PyRuntimeError, PyTypeError, PyValueError,
     },
     prelude::*,
-    types::{PyBool, PyByteArray, PyBytes, PyDict, PyInt, PyList, PyModule, PyString, PyTuple},
+    types::{
+        PyBool, PyByteArray, PyBytes, PyDict, PyInt, PyList, PyListMethods, PyModule, PyString,
+        PyTuple, PyTupleMethods,
+    },
 };
 use rustc_hash::FxHashMap;
 use self_cell::self_cell;
@@ -659,6 +662,14 @@ impl Reader {
             ));
         }
 
+        if let Ok(list) = ips.cast::<PyList>() {
+            return self.get_many_from_items(py, reader, list.iter(), list.len());
+        }
+
+        if let Ok(tuple) = ips.cast::<PyTuple>() {
+            return self.get_many_from_items(py, reader, tuple.iter(), tuple.len());
+        }
+
         let iterator = ips.try_iter().map_err(|_| {
             PyTypeError::new_err("ips must be an iterable of strings or ipaddress objects")
         })?;
@@ -710,6 +721,27 @@ impl Reader {
 
         let owned_path = self.get_or_parse_path(py, path)?;
         let path_elements = path_elements_from_owned_path(&owned_path);
+
+        if let Ok(list) = ips.cast::<PyList>() {
+            return self.get_many_path_from_items(
+                py,
+                reader,
+                list.iter(),
+                list.len(),
+                &path_elements,
+            );
+        }
+
+        if let Ok(tuple) = ips.cast::<PyTuple>() {
+            return self.get_many_path_from_items(
+                py,
+                reader,
+                tuple.iter(),
+                tuple.len(),
+                &path_elements,
+            );
+        }
+
         let iterator = ips.try_iter().map_err(|_| {
             PyTypeError::new_err("ips must be an iterable of strings or ipaddress objects")
         })?;
@@ -969,6 +1001,39 @@ impl Reader {
         cache.iter().find_map(|(cached_tuple, cached_path)| {
             (cached_tuple.bind(py).as_ptr() == path_ptr).then(|| Arc::clone(cached_path))
         })
+    }
+
+    fn get_many_from_items<'py>(
+        &self,
+        py: Python<'py>,
+        reader: &ReaderSource,
+        items: impl IntoIterator<Item = Bound<'py, PyAny>>,
+        capacity: usize,
+    ) -> PyResult<Vec<Py<PyAny>>> {
+        let mut objects = Vec::with_capacity(capacity);
+        for ip in items {
+            let ip_addr = self.parse_lookup_ip(&ip)?;
+            objects.push(self.lookup_result_to_python(py, reader.lookup(ip_addr))?);
+        }
+        Ok(objects)
+    }
+
+    fn get_many_path_from_items<'py>(
+        &self,
+        py: Python<'py>,
+        reader: &ReaderSource,
+        items: impl IntoIterator<Item = Bound<'py, PyAny>>,
+        capacity: usize,
+        path_elements: &[PathElement<'_>],
+    ) -> PyResult<Vec<Py<PyAny>>> {
+        let mut objects = Vec::with_capacity(capacity);
+        for ip in items {
+            let ip_addr = self.parse_lookup_ip(&ip)?;
+            objects.push(
+                self.lookup_result_to_python(py, reader.lookup_path(ip_addr, path_elements))?,
+            );
+        }
+        Ok(objects)
     }
 }
 
