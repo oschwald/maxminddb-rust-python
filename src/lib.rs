@@ -530,8 +530,8 @@ impl Reader {
     ///         or an ipaddress.IPv4Address or ipaddress.IPv6Address object.
     ///
     /// Returns:
-    ///     A dictionary containing the database record for the IP address, or None
-    ///     if the address is not in the database.
+    ///     The database record value for the IP address, or None if the address
+    ///     is not in the database.
     ///
     /// Raises:
     ///     ValueError: If the database has been closed or the IP address is invalid.
@@ -597,9 +597,9 @@ impl Reader {
     ///         or an ipaddress.IPv4Address or ipaddress.IPv6Address object.
     ///
     /// Returns:
-    ///     A tuple of (record, prefix_length) where record is a dictionary containing
-    ///     the database record (or None if not found), and prefix_length is an integer
-    ///     representing the network prefix length associated with the record.
+    ///     A tuple of (record, prefix_length) where record is the database record
+    ///     value (or None if not found), and prefix_length is an integer representing
+    ///     the network prefix length associated with the record.
     ///
     /// Raises:
     ///     ValueError: If the database has been closed or the IP address is invalid.
@@ -637,7 +637,7 @@ impl Reader {
     ///         (e.g., ['1.2.3.4', '8.8.8.8']).
     ///
     /// Returns:
-    ///     A list of dictionaries containing database records for each IP address.
+    ///     A list of database record values for each IP address.
     ///     Elements will be None for IP addresses not found in the database.
     ///     The order of results matches the order of input IPs.
     ///

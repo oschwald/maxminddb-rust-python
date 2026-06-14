@@ -111,9 +111,7 @@ class Reader:
         """True if the database has been closed, False otherwise."""
         ...
 
-    def get(
-        self, ip_address: Union[str, IPv4Address, IPv6Address]
-    ) -> Optional[dict[str, Any]]:
+    def get(self, ip_address: Union[str, IPv4Address, IPv6Address]) -> Optional[Any]:
         """
         Query the database for information about an IP address.
 
@@ -122,8 +120,8 @@ class Reader:
                 or an ipaddress.IPv4Address or ipaddress.IPv6Address object.
 
         Returns:
-            A dictionary containing the database record for the IP address, or None
-            if the address is not in the database.
+            The database record value for the IP address, or None if the address
+            is not in the database.
 
         Raises:
             ValueError: If the database has been closed or the IP address is invalid.
@@ -133,7 +131,7 @@ class Reader:
 
     def get_with_prefix_len(
         self, ip_address: Union[str, IPv4Address, IPv6Address]
-    ) -> tuple[Optional[dict[str, Any]], int]:
+    ) -> tuple[Optional[Any], int]:
         """
         Query the database for information about an IP address and return the network prefix length.
 
@@ -142,8 +140,8 @@ class Reader:
                 or an ipaddress.IPv4Address or ipaddress.IPv6Address object.
 
         Returns:
-            A tuple of (record, prefix_length) where record is a dictionary containing
-            the database record (or None if not found), and prefix_length is an integer
+            A tuple of (record, prefix_length) where record is the database
+            record value (or None if not found), and prefix_length is an integer
             representing the network prefix length associated with the record.
 
         Raises:
@@ -180,7 +178,7 @@ class Reader:
 
     def get_many(
         self, ips: Sequence[Union[str, IPv4Address, IPv6Address]]
-    ) -> list[Optional[dict[str, Any]]]:
+    ) -> list[Optional[Any]]:
         """
         Query the database for multiple IP addresses in a single batch operation.
 
@@ -193,7 +191,7 @@ class Reader:
                 (e.g., ['1.2.3.4', '8.8.8.8']).
 
         Returns:
-            A list of dictionaries containing database records for each IP address.
+            A list of database record values for each IP address.
             Elements will be None for IP addresses not found in the database.
             The order of results matches the order of input IPs.
 
@@ -252,7 +250,7 @@ class Reader:
 
     def __iter__(
         self,
-    ) -> Iterator[tuple[Union[IPv4Network, IPv6Network], dict[str, Any]]]:
+    ) -> Iterator[tuple[Union[IPv4Network, IPv6Network], Any]]:
         """
         Iterate over all networks in the database.
 
