@@ -36,7 +36,7 @@ const PY_MAP_KEY_CACHE_MAX: usize = 256;
 
 // Define InvalidDatabaseError exception (subclass of RuntimeError)
 pyo3::create_exception!(
-    maxminddb_pyo3_exceptions,
+    maxminddb_rust,
     InvalidDatabaseError,
     PyRuntimeError,
     "Invalid MaxMind DB"
@@ -410,7 +410,7 @@ fn convert_prefix_len(queried_ip: IpAddr, network: ipnetwork::IpNetwork) -> usiz
 }
 
 /// Metadata about the MaxMind DB database
-#[pyclass(module = "maxminddb_rust.extension")]
+#[pyclass(module = "maxminddb_rust")]
 struct Metadata {
     /// The major version number of the binary format used when creating the database.
     #[pyo3(get)]
@@ -490,7 +490,7 @@ impl Metadata {
 
 /// A Python wrapper around the MaxMind DB reader.
 /// Supports both memory-mapped files (MODE_MMAP) and in-memory (MODE_MEMORY) modes.
-#[pyclass(module = "maxminddb_rust.extension")]
+#[pyclass(module = "maxminddb_rust")]
 struct Reader {
     reader: ArcSwapOption<ReaderSource>,
     ip_version: u16,
@@ -922,7 +922,7 @@ impl Reader {
 /// `_reader_guard` must remain declared after `iter`. Rust drops fields in
 /// declaration order, and `extend_within_lifetime` relies on the guard being
 /// dropped after the iterator that borrows from it.
-#[pyclass(module = "maxminddb_rust.extension")]
+#[pyclass(module = "maxminddb_rust")]
 struct ReaderIterator {
     iter: ReaderWithin,
     _reader_guard: Arc<ReaderSource>,
