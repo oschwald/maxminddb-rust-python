@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configurable regression thresholds and JSON output.
 - Pre-generated benchmark input IP addresses to reduce benchmark harness
   overhead.
+- Reduced `get_many_path()` overhead by converting parsed lookup paths to
+  borrowed `PathElement` slices once per call instead of once per IP lookup.
+- Added a strict fast path for IPv4 string parsing to reduce per-lookup input
+  parsing overhead.
 - Reduced lookup synchronization overhead by replacing the hot-path
   `RwLock<Option<Arc<_>>>` reader access with `ArcSwapOption` and borrowing the
   loaded reader for single-lookups instead of cloning an `Arc` every time.
