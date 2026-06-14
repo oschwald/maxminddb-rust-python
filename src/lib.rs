@@ -13,6 +13,7 @@ use pyo3::{
     types::{PyBool, PyByteArray, PyBytes, PyDict, PyInt, PyList, PyModule, PyString, PyTuple},
 };
 use rustc_hash::FxHashMap;
+use self_cell::self_cell;
 use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 use std::{
     cell::RefCell,
@@ -20,7 +21,6 @@ use std::{
     fmt,
     fs::File,
     io::Read as IoRead,
-    mem::transmute,
     net::IpAddr,
     path::Path,
     str::FromStr,
@@ -986,15 +986,9 @@ fn is_bytes_like_or_string(obj: &Bound<'_, PyAny>) -> bool {
 }
 
 /// Iterator for Reader that yields `(network, record)` tuples.
-///
-/// Safety:
-/// `_reader_guard` must remain declared after `iter`. Rust drops fields in
-/// declaration order, and `extend_within_lifetime` relies on the guard being
-/// dropped after the iterator that borrows from it.
 #[pyclass(module = "maxminddb_rust")]
 struct ReaderIterator {
     iter: ReaderWithin,
-    _reader_guard: Arc<ReaderSource>,
     ipv4_network_cls: Py<PyAny>,
     ipv6_network_cls: Py<PyAny>,
 }
@@ -1040,7 +1034,7 @@ impl ReaderIterator {
         let ip_version = reader.metadata().ip_version;
         let (network, network_type) = Self::root_network_for_ip_version(ip_version)?;
 
-        let iter = ReaderWithin::new(&reader, network).map_err(|e| {
+        let iter = ReaderWithin::new(reader, network).map_err(|e| {
             InvalidDatabaseError::new_err(format!("Failed to iterate {}: {}", network_type, e))
         })?;
 
@@ -1049,7 +1043,6 @@ impl ReaderIterator {
         let ipv6_network_cls = ipaddress.getattr("IPv6Network")?.unbind();
 
         Ok(Self {
-            _reader_guard: reader,
             iter,
             ipv4_network_cls,
             ipv6_network_cls,
@@ -1078,9 +1071,30 @@ impl ReaderIterator {
     }
 }
 
+type MmapWithin<'a> = Within<'a, Mmap>;
+type MemoryWithin<'a> = Within<'a, Vec<u8>>;
+
+self_cell!(
+    struct MmapWithinCell {
+        owner: Arc<ReaderSource>,
+
+        #[covariant]
+        dependent: MmapWithin,
+    }
+);
+
+self_cell!(
+    struct MemoryWithinCell {
+        owner: Arc<ReaderSource>,
+
+        #[covariant]
+        dependent: MemoryWithin,
+    }
+);
+
 enum ReaderWithin {
-    Mmap(Within<'static, Mmap>),
-    Memory(Within<'static, Vec<u8>>),
+    Mmap(MmapWithinCell),
+    Memory(MemoryWithinCell),
 }
 
 /// Result from the within iterator, containing network and decoded data
@@ -1110,41 +1124,44 @@ fn process_within_lookup<S: AsRef<[u8]>>(
 
 #[inline]
 fn next_within<S: AsRef<[u8]>>(
-    iter: &mut Within<'static, S>,
+    iter: &mut Within<'_, S>,
 ) -> Option<Result<WithinResult, MaxMindDbError>> {
     let result = iter.next()?;
     Some(result.and_then(process_within_lookup))
 }
 
-#[inline]
-unsafe fn extend_within_lifetime<S: AsRef<[u8]>>(iter: Within<'_, S>) -> Within<'static, S> {
-    // SAFETY: The caller must ensure the reader backing `iter` outlives returned iterator.
-    // `ReaderIterator` stores an Arc guard that guarantees this.
-    unsafe { transmute::<Within<'_, S>, Within<'static, S>>(iter) }
-}
-
 impl ReaderWithin {
     fn new(
-        reader: &Arc<ReaderSource>,
+        reader: Arc<ReaderSource>,
         network: ipnetwork::IpNetwork,
     ) -> Result<Self, maxminddb_crate::MaxMindDbError> {
         let options = WithinOptions::default();
         match reader.as_ref() {
-            ReaderSource::Mmap(inner) => {
-                let iter = inner.within(network, options)?;
-                Ok(Self::Mmap(unsafe { extend_within_lifetime(iter) }))
-            }
-            ReaderSource::Memory(inner) => {
-                let iter = inner.within(network, options)?;
-                Ok(Self::Memory(unsafe { extend_within_lifetime(iter) }))
-            }
+            ReaderSource::Mmap(_) => Ok(Self::Mmap(MmapWithinCell::try_new(
+                reader,
+                move |reader| match reader.as_ref() {
+                    ReaderSource::Mmap(inner) => inner.within(network, options),
+                    ReaderSource::Memory(_) => {
+                        unreachable!("reader source changed while building iterator")
+                    }
+                },
+            )?)),
+            ReaderSource::Memory(_) => Ok(Self::Memory(MemoryWithinCell::try_new(
+                reader,
+                move |reader| match reader.as_ref() {
+                    ReaderSource::Mmap(_) => {
+                        unreachable!("reader source changed while building iterator")
+                    }
+                    ReaderSource::Memory(inner) => inner.within(network, options),
+                },
+            )?)),
         }
     }
 
     fn next(&mut self) -> Option<Result<WithinResult, maxminddb_crate::MaxMindDbError>> {
         match self {
-            ReaderWithin::Mmap(iter) => next_within(iter),
-            ReaderWithin::Memory(iter) => next_within(iter),
+            ReaderWithin::Mmap(cell) => cell.with_dependent_mut(|_, iter| next_within(iter)),
+            ReaderWithin::Memory(cell) => cell.with_dependent_mut(|_, iter| next_within(iter)),
         }
     }
 }
