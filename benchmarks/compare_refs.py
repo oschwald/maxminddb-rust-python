@@ -90,6 +90,21 @@ def main() -> None:
                 reader.get_many_path(batch, path)
             return len(ips)
 
+    elif args.case == "iterate":
+
+        def run_once() -> int:
+            operations = 0
+            while operations < args.count:
+                found_record = False
+                for _network, _record in reader:
+                    found_record = True
+                    operations += 1
+                    if operations >= args.count:
+                        break
+                if not found_record:
+                    break
+            return operations
+
     else:
         raise ValueError(f"unknown benchmark case: {args.case}")
 
@@ -120,7 +135,7 @@ if __name__ == "__main__":
 """
 
 
-DEFAULT_CASES = ("get", "get_many", "get_path", "get_many_path")
+DEFAULT_CASES = ("get", "get_many", "get_path", "get_many_path", "iterate")
 
 
 def run_command(
