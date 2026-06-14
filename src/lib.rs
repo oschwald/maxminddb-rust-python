@@ -919,12 +919,13 @@ impl Reader {
 /// Iterator for Reader that yields `(network, record)` tuples.
 ///
 /// Safety:
-/// `_reader_guard` must remain declared before `iter`. `iter` is produced via
-/// `extend_within_lifetime`, which relies on `_reader_guard` being dropped last.
+/// `_reader_guard` must remain declared after `iter`. Rust drops fields in
+/// declaration order, and `extend_within_lifetime` relies on the guard being
+/// dropped after the iterator that borrows from it.
 #[pyclass(module = "maxminddb_rust.extension")]
 struct ReaderIterator {
-    _reader_guard: Arc<ReaderSource>,
     iter: ReaderWithin,
+    _reader_guard: Arc<ReaderSource>,
     ipv4_network_cls: Py<PyAny>,
     ipv6_network_cls: Py<PyAny>,
 }
