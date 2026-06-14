@@ -37,7 +37,7 @@ from maxminddb_rust import (
 )
 
 if TYPE_CHECKING:
-    from maxminddb import Reader
+    from maxminddb_rust import Reader
 
 
 def get_reader_from_file_descriptor(filepath: str, mode: int) -> Reader:

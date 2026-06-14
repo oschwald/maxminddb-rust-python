@@ -436,9 +436,11 @@ def main() -> None:
 
     temp_context = None
     if args.keep_worktrees:
-        temp_dir = Path(tempfile.mkdtemp(prefix="maxminddb-pyo3-bench."))
+        temp_dir = Path(tempfile.mkdtemp(prefix="maxminddb-rust-python-bench."))
     else:
-        temp_context = tempfile.TemporaryDirectory(prefix="maxminddb-pyo3-bench.")
+        temp_context = tempfile.TemporaryDirectory(
+            prefix="maxminddb-rust-python-bench."
+        )
         temp_dir = Path(temp_context.name)
 
     worktrees: list[Path] = []

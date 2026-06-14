@@ -156,7 +156,7 @@ def search_for_network():
 
 def main():
     """Run all iterator examples."""
-    print("MaxMindDB Iterator Examples")
+    print("MaxMind DB Iterator Examples")
     print("=" * 60)
 
     basic_iteration()

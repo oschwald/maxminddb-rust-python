@@ -227,7 +227,7 @@ def chunked_batch_processing():
 
 def main():
     """Run all batch processing examples."""
-    print("MaxMindDB Batch Processing Examples")
+    print("MaxMind DB Batch Processing Examples")
     print("=" * 60)
 
     basic_batch_lookup()

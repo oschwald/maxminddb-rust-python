@@ -56,7 +56,7 @@ def main():
     args = parser.parse_args()
 
     print("=" * 70)
-    print("MaxMindDB PyO3 Performance Benchmark")
+    print("MaxMind DB Rust Performance Benchmark")
     print("=" * 70)
     print(f"Total lookups per test: {format_number(args.count)}")
     print("=" * 70)

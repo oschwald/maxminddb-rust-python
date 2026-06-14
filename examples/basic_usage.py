@@ -14,7 +14,7 @@ DATABASE_PATH = "/var/lib/GeoIP/GeoIP2-City.mmdb"
 
 def main():
     """Demonstrate basic maxminddb usage."""
-    print("MaxMindDB Basic Usage Example")
+    print("MaxMind DB Basic Usage Example")
     print("=" * 60)
 
     # Open the database
