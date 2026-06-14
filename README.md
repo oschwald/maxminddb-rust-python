@@ -15,8 +15,9 @@ Performance depends on the database, lookup pattern, and hardware. Run the
 benchmark scripts in `benchmarks/` against your own databases to measure
 expected throughput in your environment.
 
-The reader is thread-safe and can be shared across threads for parallel
-lookups.
+The reader is thread-safe and can be shared across threads. Lookup methods
+create Python objects and hold the GIL while doing so, so CPU-bound lookups from
+Python threads are still constrained by normal Python GIL behavior.
 
 ## Features
 

@@ -178,16 +178,19 @@ class Reader:
         """
         ...
 
-    def get_many(self, ips: list[str]) -> list[Optional[dict[str, Any]]]:
+    def get_many(
+        self, ips: Sequence[Union[str, IPv4Address, IPv6Address]]
+    ) -> list[Optional[dict[str, Any]]]:
         """
         Query the database for multiple IP addresses in a single batch operation.
 
         This is an extension method not available in the original maxminddb module.
         It provides better performance than calling get() repeatedly by reducing
-        call overhead and releasing the GIL during the entire batch operation.
+        call overhead. This method keeps the GIL for the duration of the batch.
 
         Args:
-            ips: A list of IP address strings to look up (e.g., ['1.2.3.4', '8.8.8.8']).
+            ips: A sequence of IP address strings or ipaddress objects to look up
+                (e.g., ['1.2.3.4', '8.8.8.8']).
 
         Returns:
             A list of dictionaries containing database records for each IP address.

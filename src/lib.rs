@@ -10,7 +10,7 @@ use pyo3::{
         PyFileNotFoundError, PyIOError, PyOSError, PyRuntimeError, PyTypeError, PyValueError,
     },
     prelude::*,
-    types::{PyBytes, PyDict, PyList, PyModule, PyString, PyTuple},
+    types::{PyByteArray, PyBytes, PyDict, PyList, PyModule, PyString, PyTuple},
 };
 use rustc_hash::FxHashMap;
 use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
@@ -634,7 +634,8 @@ impl Reader {
     /// processing the batch.
     ///
     /// Args:
-    ///     ips: A list of IP address strings to look up (e.g., ['1.2.3.4', '8.8.8.8']).
+    ///     ips: An iterable of IP address strings or ipaddress objects to look up
+    ///         (e.g., ['1.2.3.4', '8.8.8.8']).
     ///
     /// Returns:
     ///     A list of dictionaries containing database records for each IP address.
@@ -656,17 +657,26 @@ impl Reader {
     ///     This method keeps the GIL for the duration of the batch. For better
     ///     concurrency with other Python threads, consider smaller batch sizes,
     ///     per-item lookups, or running lookups in a separate worker thread.
-    fn get_many(&self, py: Python, ips: Vec<String>) -> PyResult<Vec<Py<PyAny>>> {
+    fn get_many(&self, py: Python, ips: &Bound<'_, PyAny>) -> PyResult<Vec<Py<PyAny>>> {
         // Keep work under the GIL for lower per-item overhead; callers wanting
         // concurrent Python execution should prefer smaller batches or threading.
         let reader = self.reader.load();
         let reader = reader
             .as_ref()
             .ok_or_else(|| PyValueError::new_err(ERR_CLOSED_DB))?;
-        let mut objects = Vec::with_capacity(ips.len());
-        for ip in &ips {
-            let ip_addr = parse_ip_string(ip)?;
-            let ip_addr = self.validate_lookup_ip(ip_addr)?;
+
+        if is_bytes_like_or_string(ips) {
+            return Err(PyTypeError::new_err(
+                "ips must be an iterable of strings or ipaddress objects",
+            ));
+        }
+
+        let iterator = ips.try_iter().map_err(|_| {
+            PyTypeError::new_err("ips must be an iterable of strings or ipaddress objects")
+        })?;
+        let mut objects = Vec::with_capacity(ips.len().unwrap_or(0));
+        for ip in iterator {
+            let ip_addr = self.parse_lookup_ip(&ip?)?;
             objects.push(self.lookup_result_to_python(py, reader.lookup(ip_addr))?);
         }
 
@@ -914,6 +924,13 @@ impl Reader {
             (cached_tuple.bind(py).as_ptr() == path_ptr).then(|| Arc::clone(cached_path))
         })
     }
+}
+
+#[inline]
+fn is_bytes_like_or_string(obj: &Bound<'_, PyAny>) -> bool {
+    obj.is_instance_of::<PyString>()
+        || obj.is_instance_of::<PyBytes>()
+        || obj.is_instance_of::<PyByteArray>()
 }
 
 /// Iterator for Reader that yields `(network, record)` tuples.
