@@ -4,9 +4,9 @@ This guide explains how to migrate from the official `maxminddb` package to `max
 
 ## Why Migrate?
 
-`maxminddb-rust` offers significant performance improvements over the official `maxminddb` package:
+`maxminddb-rust` can offer significant performance improvements over the official `maxminddb` package:
 
-- **45% faster** on average (373K vs 257K lookups/second)
+- Benchmarkable Rust-backed lookup performance
 - Same API, just better performance
 - All open modes supported
 - Additional `get_many()` method for batch lookups
@@ -164,12 +164,15 @@ def lookup():
 
 ## Performance Comparison
 
-After migration, you should see performance improvements:
+Performance depends on the database, lookup pattern, Python version, and hardware. Run the benchmarks against your own workload before relying on a specific throughput number:
 
-| Operation        | Official maxminddb | maxminddb-rust | Improvement |
-| ---------------- | ------------------ | -------------- | ----------- |
-| Single lookup    | ~260K ops/sec      | ~373K ops/sec  | +45%        |
-| Batch (get_many) | N/A                | ~500K+ ops/sec | New feature |
+```bash
+uv run python benchmarks/benchmark.py --file /path/to/GeoIP2-City.mmdb --count 250000
+uv run python benchmarks/benchmark_batch.py --file /path/to/GeoIP2-City.mmdb --batch-size 100
+uv run python benchmarks/compare_refs.py --baseline-ref origin/main --candidate-ref HEAD
+```
+
+`get_many()` is an extension that the official package does not provide, so compare it against your current loop of `get()` calls when evaluating a migration.
 
 ## Troubleshooting
 
@@ -230,7 +233,7 @@ import maxminddb  # Official package
 | ----------------- | ------------------ | ----------------------- |
 | Package name      | `maxminddb`        | `maxminddb-rust`        |
 | Import name       | `import maxminddb` | `import maxminddb_rust` |
-| Performance       | Baseline           | 45% faster              |
+| Performance       | Baseline           | Measure with benchmarks |
 | Implementation    | Pure Python + C    | Rust (PyO3)             |
 | API compatibility | N/A                | 100%                    |
 | get_many()        | ❌                 | ✅                      |
