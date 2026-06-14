@@ -201,6 +201,33 @@ class Reader:
         """
         ...
 
+    def get_many_path(
+        self,
+        ips: Iterable[Union[str, IPv4Address, IPv6Address]],
+        path: Sequence[Union[str, int]],
+    ) -> list[Optional[Any]]:
+        """
+        Query the database for a specific path for multiple IP addresses.
+
+        This extension combines get_many() batching with get_path() selective
+        decoding. It parses the path once and avoids decoding full records when
+        only one field is needed.
+
+        Args:
+            ips: An iterable of IP address strings or ipaddress objects to look up
+                (e.g., ['1.2.3.4', '8.8.8.8']).
+            path: A sequence of strings or integers representing the path to the data.
+
+        Returns:
+            A list of values at the specified path. Elements will be None for IP
+            addresses or paths not found in the database.
+
+        Raises:
+            ValueError: If the database has been closed or any IP address is invalid.
+            InvalidDatabaseError: If the database data is corrupt or invalid.
+        """
+        ...
+
     def metadata(self) -> Metadata:
         """
         Get metadata about the MaxMind DB database.

@@ -683,6 +683,57 @@ impl Reader {
         Ok(objects)
     }
 
+    /// Query the database for a specific path for multiple IP addresses.
+    ///
+    /// This extension combines get_many() batching with get_path() selective
+    /// decoding. It parses the path once and avoids decoding full records when
+    /// only one field is needed.
+    ///
+    /// Args:
+    ///     ips: An iterable of IP address strings or ipaddress objects to look up
+    ///         (e.g., ['1.2.3.4', '8.8.8.8']).
+    ///     path: A sequence (tuple or list) of strings or integers representing the
+    ///         path to the data.
+    ///
+    /// Returns:
+    ///     A list of values at the specified path. Elements will be None for IP
+    ///     addresses or paths not found in the database.
+    ///
+    /// Raises:
+    ///     ValueError: If the database has been closed or any IP address is invalid.
+    ///     TypeError: If the path or IP iterable is invalid.
+    ///     InvalidDatabaseError: If the database data is corrupt or invalid.
+    fn get_many_path(
+        &self,
+        py: Python,
+        ips: &Bound<'_, PyAny>,
+        path: &Bound<'_, PyAny>,
+    ) -> PyResult<Vec<Py<PyAny>>> {
+        let reader = self.reader.load();
+        let reader = reader
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err(ERR_CLOSED_DB))?;
+
+        if is_bytes_like_or_string(ips) {
+            return Err(PyTypeError::new_err(
+                "ips must be an iterable of strings or ipaddress objects",
+            ));
+        }
+
+        let owned_path = self.get_or_parse_path(py, path)?;
+        let iterator = ips.try_iter().map_err(|_| {
+            PyTypeError::new_err("ips must be an iterable of strings or ipaddress objects")
+        })?;
+        let mut objects = Vec::with_capacity(ips.len().unwrap_or(0));
+        for ip in iterator {
+            let ip_addr = self.parse_lookup_ip(&ip?)?;
+            objects
+                .push(self.lookup_result_to_python(py, reader.lookup_path(ip_addr, &owned_path))?);
+        }
+
+        Ok(objects)
+    }
+
     /// Get metadata about the MaxMind DB database.
     ///
     /// Returns:

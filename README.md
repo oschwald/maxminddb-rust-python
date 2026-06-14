@@ -46,6 +46,7 @@ Extensions (not in the original package):
 - `get_many()` for batch lookups
 - `get_path()` for retrieving a specific field from a record (for example,
   `('country', 'iso_code')`) without decoding the entire record
+- `get_many_path()` for retrieving a specific field for many IP addresses
 
 Not yet implemented:
 
@@ -134,6 +135,10 @@ print(f"ISO Code: {iso_code}")
 
 # Accessing arrays by index
 # e.g., reader.get_path("8.8.8.8", ("subdivisions", 0, "iso_code"))
+
+# Batch lookup for a specific field
+ips = ["8.8.8.8", "1.1.1.1", "208.67.222.222"]
+iso_codes = reader.get_many_path(ips, ("country", "iso_code"))
 ```
 
 ### Iterator Support
