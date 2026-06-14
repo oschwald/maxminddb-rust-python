@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Updated dependencies, including PyO3 0.29.0 and maxminddb 0.28.1.
+- Removed the now-unnecessary PyO3 `generate-import-lib` feature; PyO3 0.29
+  uses raw-dylib linking on Windows.
 - `Reader.get_many()` now accepts any iterable of IP addresses instead of
   requiring a pre-built sequence, while preserving output order.
 - Expanded type hints for decoded record values and IP address inputs.
