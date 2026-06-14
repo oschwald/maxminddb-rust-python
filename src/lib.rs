@@ -355,28 +355,19 @@ impl ReaderSource {
     fn lookup_path(
         &self,
         ip: IpAddr,
-        path: &[OwnedPathElement],
+        path_elements: &[PathElement<'_>],
     ) -> Result<Option<PyDecodedValue>, maxminddb_crate::MaxMindDbError> {
-        let path_elements: Vec<PathElement> = path
-            .iter()
-            .map(|e| match e {
-                OwnedPathElement::Key(s) => PathElement::Key(s.as_str()),
-                OwnedPathElement::Index(i) => PathElement::Index(*i),
-                OwnedPathElement::IndexFromEnd(i) => PathElement::IndexFromEnd(*i),
-            })
-            .collect();
-
         match self {
             ReaderSource::Mmap(reader) => {
                 let result = reader.lookup(ip)?;
 
-                result.decode_path(&path_elements)
+                result.decode_path(path_elements)
             }
 
             ReaderSource::Memory(reader) => {
                 let result = reader.lookup(ip)?;
 
-                result.decode_path(&path_elements)
+                result.decode_path(path_elements)
             }
         }
     }
@@ -578,13 +569,14 @@ impl Reader {
 
         // Parse path (cache tuple paths, which are immutable and commonly reused)
         let owned_path = self.get_or_parse_path(py, path)?;
+        let path_elements = path_elements_from_owned_path(&owned_path);
 
         let reader = self.reader.load();
         let reader = reader
             .as_ref()
             .ok_or_else(|| PyValueError::new_err(ERR_CLOSED_DB))?;
 
-        self.lookup_result_to_python(py, reader.lookup_path(parsed_ip, &owned_path))
+        self.lookup_result_to_python(py, reader.lookup_path(parsed_ip, &path_elements))
     }
 
     /// Query the database for information about an IP address and return the network prefix length.
@@ -717,14 +709,16 @@ impl Reader {
         }
 
         let owned_path = self.get_or_parse_path(py, path)?;
+        let path_elements = path_elements_from_owned_path(&owned_path);
         let iterator = ips.try_iter().map_err(|_| {
             PyTypeError::new_err("ips must be an iterable of strings or ipaddress objects")
         })?;
         let mut objects = Vec::with_capacity(ips.len().unwrap_or(0));
         for ip in iterator {
             let ip_addr = self.parse_lookup_ip(&ip?)?;
-            objects
-                .push(self.lookup_result_to_python(py, reader.lookup_path(ip_addr, &owned_path))?);
+            objects.push(
+                self.lookup_result_to_python(py, reader.lookup_path(ip_addr, &path_elements))?,
+            );
         }
 
         Ok(objects)
@@ -1215,6 +1209,16 @@ fn signed_index_to_owned_path_element(n: isize) -> OwnedPathElement {
             .unwrap_or(usize::MAX);
         OwnedPathElement::IndexFromEnd(index)
     }
+}
+
+fn path_elements_from_owned_path(path: &[OwnedPathElement]) -> Vec<PathElement<'_>> {
+    path.iter()
+        .map(|element| match element {
+            OwnedPathElement::Key(key) => PathElement::Key(key.as_str()),
+            OwnedPathElement::Index(index) => PathElement::Index(*index),
+            OwnedPathElement::IndexFromEnd(index) => PathElement::IndexFromEnd(*index),
+        })
+        .collect()
 }
 
 /// Helper function to parse IP address from string or ipaddress objects
