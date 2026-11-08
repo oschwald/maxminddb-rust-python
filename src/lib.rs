@@ -702,12 +702,15 @@ impl Reader {
         mut lookup: impl FnMut(IpAddr) -> PyResult<Py<PyAny>>,
     ) -> PyResult<Py<PyAny>> {
         let mut objects;
-        if let Ok(list) = ips.cast::<PyList>() {
+        // The fast paths read list and tuple storage directly. Exact types
+        // only: a subclass may override `__iter__`, so it takes the iterator
+        // path below.
+        if let Ok(list) = ips.cast_exact::<PyList>() {
             objects = Vec::with_capacity(list.len());
             for ip in list.iter() {
                 objects.push(lookup(self.parse_lookup_ip(&ip)?)?);
             }
-        } else if let Ok(tuple) = ips.cast::<PyTuple>() {
+        } else if let Ok(tuple) = ips.cast_exact::<PyTuple>() {
             objects = Vec::with_capacity(tuple.len());
             for ip in tuple.as_slice() {
                 objects.push(lookup(self.parse_lookup_ip(ip)?)?);

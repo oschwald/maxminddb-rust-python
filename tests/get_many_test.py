@@ -184,3 +184,19 @@ def test_get_many_keeps_error_raised_by_iter() -> None:
             reader.get_many(_TypeErrorIter())  # type: ignore[arg-type]
         assert isinstance(excinfo.value.__cause__, TypeError)
         assert str(excinfo.value.__cause__) == "bad config"
+
+
+@pytest.mark.parametrize("base", [list, tuple])
+def test_get_many_honors_overridden_iter_on_sequence_subclass(base: type) -> None:
+    class IterOverride(base):  # type: ignore[misc, valid-type]
+        def __iter__(self) -> Iterator[str]:
+            return iter(("81.2.69.142",))
+
+    db_path = Path(__file__).parent / "data" / "test-data" / "GeoIP2-City-Test.mmdb"
+
+    with maxminddb_rust.open_database(db_path) as reader:
+        expected = reader.get("81.2.69.142")
+        assert expected is not None
+        ips = IterOverride(["1.1.1.1"])
+        assert reader.get_many(ips) == [expected]
+        assert reader.get_many_path(ips, ("country",)) == [expected["country"]]
