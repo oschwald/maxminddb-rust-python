@@ -1,8 +1,8 @@
 use pyo3::{
-    exceptions::{PyTypeError, PyValueError},
+    exceptions::{PyAttributeError, PyOverflowError, PyTypeError, PyValueError},
     prelude::*,
     sync::PyOnceLock,
-    types::PyString,
+    types::{PyInt, PyString},
 };
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -133,24 +133,47 @@ fn extract_ipv4_object(ip_address: &Bound<'_, PyAny>) -> PyResult<IpAddr> {
     // The stdlib classes store their numeric address in `_ip`. Reading it
     // avoids allocating the temporary `packed` bytes used by PyO3's generic
     // IpAddr conversion. Fall back in case another implementation differs.
-    if let Ok(value) = ip_address
-        .getattr(pyo3::intern!(ip_address.py(), "_ip"))
-        .and_then(|value| value.extract::<u32>())
-    {
-        return Ok(IpAddr::V4(Ipv4Addr::from(value)));
+    let Some(value) = ip_int(ip_address)? else {
+        return ip_address.extract::<IpAddr>();
+    };
+    match value.extract::<u32>() {
+        Ok(value) => Ok(IpAddr::V4(Ipv4Addr::from(value))),
+        Err(err) if is_out_of_range(ip_address.py(), &err) => ip_address.extract::<IpAddr>(),
+        Err(err) => Err(err),
     }
-    ip_address.extract::<IpAddr>()
 }
 
 #[inline(always)]
 fn extract_ipv6_object(ip_address: &Bound<'_, PyAny>) -> PyResult<IpAddr> {
-    if let Ok(value) = ip_address
-        .getattr(pyo3::intern!(ip_address.py(), "_ip"))
-        .and_then(|value| value.extract::<u128>())
-    {
-        return Ok(IpAddr::V6(Ipv6Addr::from(value)));
+    let Some(value) = ip_int(ip_address)? else {
+        return ip_address.extract::<IpAddr>();
+    };
+    match value.extract::<u128>() {
+        Ok(value) => Ok(IpAddr::V6(Ipv6Addr::from(value))),
+        Err(err) if is_out_of_range(ip_address.py(), &err) => ip_address.extract::<IpAddr>(),
+        Err(err) => Err(err),
     }
-    ip_address.extract::<IpAddr>()
+}
+
+/// Return the `_ip` attribute if it is an int. Return `None` if the object has
+/// no `_ip` or `_ip` is not an int. A value that is not an int is not
+/// converted, so no `__index__` method runs. Any other error, such as a
+/// `RuntimeError` or `ValueError` raised by a property, propagates.
+#[inline(always)]
+fn ip_int<'py>(ip_address: &Bound<'py, PyAny>) -> PyResult<Option<Bound<'py, PyInt>>> {
+    let py = ip_address.py();
+    match ip_address.getattr(pyo3::intern!(py, "_ip")) {
+        Ok(value) => Ok(value.cast_into::<PyInt>().ok()),
+        Err(err) if err.is_instance_of::<PyAttributeError>(py) => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+/// Report whether an error from converting an int `_ip` means it is out of
+/// range for the address. PyO3 raises `OverflowError` or `ValueError` for an
+/// out-of-range int.
+fn is_out_of_range(py: Python<'_>, err: &PyErr) -> bool {
+    err.is_instance_of::<PyOverflowError>(py) || err.is_instance_of::<PyValueError>(py)
 }
 
 /// Generate the error message for an IPv6 lookup in an IPv4 database.
