@@ -9,13 +9,11 @@ use pyo3::{
         PyByteArray, PyBytes, PyList, PyListMethods, PyModule, PyString, PyTuple, PyTupleMethods,
     },
 };
-use std::{
-    collections::VecDeque,
-    ffi::OsString,
-    net::IpAddr,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+use std::{cell::RefCell, ffi::OsString, net::IpAddr, path::PathBuf, sync::Arc};
+
+thread_local! {
+    static PATH_CACHE: RefCell<PathCache> = const { RefCell::new(PathCache::new()) };
+}
 
 mod decode;
 mod ip;
@@ -82,6 +80,49 @@ impl TryFrom<i32> for OpenMode {
 }
 
 type CachedPath = (Py<PyTuple>, Arc<Vec<OwnedPathElement>>);
+
+const PATH_CACHE_SLOTS: usize = 32;
+
+/// Per-thread cache of parsed tuple paths. A parsed path does not depend on
+/// the reader, so one cache serves every Reader on the thread without a lock.
+struct PathCache {
+    entries: [Option<CachedPath>; PATH_CACHE_SLOTS],
+    next: usize,
+}
+
+impl PathCache {
+    const fn new() -> Self {
+        Self {
+            entries: [const { None }; PATH_CACHE_SLOTS],
+            next: 0,
+        }
+    }
+
+    /// Find a cached path by tuple identity first, then by tuple contents.
+    fn find(&self, path: &Bound<'_, PyTuple>) -> Option<Arc<Vec<OwnedPathElement>>> {
+        let path_ptr = path.as_ptr();
+        self.entries
+            .iter()
+            .flatten()
+            .find(|(cached_tuple, _)| cached_tuple.as_ptr() == path_ptr)
+            .or_else(|| {
+                self.entries
+                    .iter()
+                    .flatten()
+                    .find(|(_, cached_path)| path_tuple_matches_owned(path, cached_path))
+            })
+            .map(|(_, cached_path)| Arc::clone(cached_path))
+    }
+
+    /// Insert an entry and return the evicted one. The caller must drop the
+    /// evicted entry after releasing the borrow, because releasing the tuple can
+    /// run Python code that looks up a path.
+    fn insert(&mut self, entry: CachedPath) -> Option<CachedPath> {
+        let evicted = self.entries[self.next].replace(entry);
+        self.next = (self.next + 1) % PATH_CACHE_SLOTS;
+        evicted
+    }
+}
 
 /// Enum to handle different reader source types
 pub(crate) enum ReaderSource {
@@ -182,7 +223,6 @@ fn convert_prefix_len(queried_ip: IpAddr, network: ipnetwork::IpNetwork) -> usiz
 struct Reader {
     reader: ArcSwapOption<ReaderSource>,
     ip_version: u16,
-    path_cache: Mutex<VecDeque<CachedPath>>,
 }
 
 #[pymethods]
@@ -267,16 +307,14 @@ impl Reader {
     ) -> PyResult<Py<PyAny>> {
         let parsed_ip = self.parse_lookup_ip(ip_address)?;
 
-        // Parse path (cache tuple paths, which are immutable and commonly reused)
-        let owned_path = self.get_or_parse_path(path)?;
-        let path_elements = path_elements_from_owned_path(&owned_path);
+        self.parse_and_call_with_path(path, |path_elements| {
+            let reader = self.reader.load();
+            let reader = reader
+                .as_ref()
+                .ok_or_else(|| PyValueError::new_err(ERR_CLOSED_DB))?;
 
-        let reader = self.reader.load();
-        let reader = reader
-            .as_ref()
-            .ok_or_else(|| PyValueError::new_err(ERR_CLOSED_DB))?;
-
-        self.lookup_result_to_python(py, reader.lookup_path(parsed_ip, &path_elements))
+            self.lookup_result_to_python(py, reader.lookup_path(parsed_ip, path_elements))
+        })
     }
 
     /// Query the database for information about an IP address and return the network prefix length.
@@ -391,11 +429,10 @@ impl Reader {
             .ok_or_else(|| PyValueError::new_err(ERR_CLOSED_DB))?;
         reject_str_ips(ips)?;
 
-        let owned_path = self.get_or_parse_path(path)?;
-        let path_elements = path_elements_from_owned_path(&owned_path);
-
-        self.lookup_many(py, ips, |ip_addr| {
-            self.lookup_result_to_python(py, reader.lookup_path(ip_addr, &path_elements))
+        self.parse_and_call_with_path(path, |path_elements| {
+            self.lookup_many(py, ips, |ip_addr| {
+                self.lookup_result_to_python(py, reader.lookup_path(ip_addr, path_elements))
+            })
         })
     }
 
@@ -594,27 +631,59 @@ impl Reader {
         }
     }
 
-    fn get_or_parse_path(&self, path: &Bound<'_, PyAny>) -> PyResult<Arc<Vec<OwnedPathElement>>> {
-        const PATH_CACHE_MAX_ENTRIES: usize = 64;
-
-        let Ok(path_tuple) = path.cast::<PyTuple>() else {
-            return Ok(Arc::new(parse_path(path)?));
-        };
-        if let Some(cached_path) = self.lookup_cached_path(path_tuple) {
-            return Ok(cached_path);
+    #[inline]
+    fn parse_and_call_with_path<R>(
+        &self,
+        path: &Bound<'_, PyAny>,
+        f: impl FnOnce(&[PathElement<'_>]) -> PyResult<R>,
+    ) -> PyResult<R> {
+        // Cache exact tuples only. The cache matches tuples by their storage,
+        // which a subclass that overrides `__iter__` would not agree with.
+        if let Ok(path_tuple) = path.cast_exact::<PyTuple>() {
+            let owned_path = Self::get_or_parse_tuple_path(path_tuple)?;
+            return Self::call_with_owned_path(&owned_path, f);
         }
 
-        let parsed = Arc::new(parse_path(path)?);
-        if let Ok(mut cache) = self.path_cache.lock() {
-            if let Some(cached_path) = Self::lookup_cached_path_in_cache(path_tuple, &cache) {
-                return Ok(cached_path);
-            }
-            if cache.len() >= PATH_CACHE_MAX_ENTRIES {
-                cache.pop_front();
-            }
-            cache.push_back((path_tuple.clone().unbind(), Arc::clone(&parsed)));
+        let owned_path = parse_path(path)?;
+        Self::call_with_owned_path(&owned_path, f)
+    }
+
+    #[inline]
+    fn get_or_parse_tuple_path(
+        path_tuple: &Bound<'_, PyTuple>,
+    ) -> PyResult<Arc<Vec<OwnedPathElement>>> {
+        if let Some(cached) = PATH_CACHE.with(|cache| cache.borrow().find(path_tuple)) {
+            return Ok(cached);
         }
+
+        let parsed = Arc::new(parse_path(path_tuple.as_any())?);
+        let evicted = PATH_CACHE.with(|cache| match cache.try_borrow_mut() {
+            Ok(mut cache) => cache.insert((path_tuple.clone().unbind(), Arc::clone(&parsed))),
+            // `find` holds a shared borrow while matching, and a failed match
+            // can create and discard a Python exception. That allocation can
+            // start a GC pass, and a finalizer that looks up a path then gets
+            // here with the borrow still held. Skip caching that path.
+            Err(_) => None,
+        });
+        drop(evicted);
         Ok(parsed)
+    }
+
+    #[inline]
+    fn call_with_owned_path<R>(
+        owned_path: &[OwnedPathElement],
+        f: impl FnOnce(&[PathElement<'_>]) -> PyResult<R>,
+    ) -> PyResult<R> {
+        let mut stack_buf: [PathElement<'_>; 8] = [const { PathElement::Index(0) }; 8];
+        if owned_path.len() <= stack_buf.len() {
+            for (dst, src) in stack_buf.iter_mut().zip(owned_path.iter()) {
+                *dst = src.as_path_element();
+            }
+            f(&stack_buf[..owned_path.len()])
+        } else {
+            let path_elements = path_elements_from_owned_path(owned_path);
+            f(&path_elements)
+        }
     }
 
     /// Get the reader from the internal mutex, returning an error if closed
@@ -623,30 +692,6 @@ impl Reader {
         self.reader
             .load_full()
             .ok_or_else(|| PyValueError::new_err(ERR_CLOSED_DB))
-    }
-
-    #[inline]
-    fn lookup_cached_path(&self, path: &Bound<'_, PyTuple>) -> Option<Arc<Vec<OwnedPathElement>>> {
-        self.path_cache
-            .lock()
-            .ok()
-            .and_then(|cache| Self::lookup_cached_path_in_cache(path, &cache))
-    }
-
-    #[inline]
-    fn lookup_cached_path_in_cache(
-        path: &Bound<'_, PyTuple>,
-        cache: &VecDeque<CachedPath>,
-    ) -> Option<Arc<Vec<OwnedPathElement>>> {
-        cache
-            .iter()
-            .find(|(cached_tuple, _)| cached_tuple.bind(path.py()).as_ptr() == path.as_ptr())
-            .or_else(|| {
-                cache
-                    .iter()
-                    .find(|(_, cached_path)| path_tuple_matches_owned(path, cached_path.as_slice()))
-            })
-            .map(|(_, cached_path)| Arc::clone(cached_path))
     }
 
     /// Look up each address in `ips` and return the results as a list.

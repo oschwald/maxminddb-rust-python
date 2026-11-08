@@ -83,6 +83,27 @@ def test_get_many_path_closed_db() -> None:
         reader.get_many_path(["81.2.69.142"], ("country", "iso_code"))
 
 
+def test_get_many_path_handles_mutated_path_list_and_reentrant_cache() -> None:
+    with maxminddb_rust.open_database(city_db_path()) as reader:
+        path_list = ["country", "iso_code"]
+        tuple_path = ("country", "iso_code")
+
+        def mutating_ip(reader: maxminddb_rust.Reader, path_list: list[str]) -> object:
+            def get_ip(_self: object) -> int:
+                path_list.clear()
+                for index in range(70):
+                    reader.get_path("81.2.69.142", (f"k{index}",))
+                return int(ip_address("81.2.69.142"))
+
+            return type("IPv4Address", (), {"_ip": property(get_ip)})()
+
+        ips = [mutating_ip(reader, path_list), "81.2.69.142"]
+        assert reader.get_many_path(ips, path_list) == ["GB", "GB"]  # type: ignore[arg-type]
+
+        ips_tuple = [mutating_ip(reader, path_list), "81.2.69.142"]
+        assert reader.get_many_path(ips_tuple, tuple_path) == ["GB", "GB"]  # type: ignore[arg-type]
+
+
 def test_get_many_path_rejects_str_ips_before_parsing_path() -> None:
     with maxminddb_rust.open_database(city_db_path()) as reader, pytest.raises(
         TypeError, match="ips must be an iterable"

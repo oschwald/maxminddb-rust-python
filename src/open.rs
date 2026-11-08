@@ -6,7 +6,7 @@ use pyo3::{
     exceptions::{PyFileNotFoundError, PyIOError},
     prelude::*,
 };
-use std::{collections::VecDeque, fmt, fs::File, path::Path, sync::Mutex};
+use std::{fmt, fs::File, path::Path};
 
 fn open_file(path: &Path) -> PyResult<File> {
     File::open(path).map_err(|err| match err.kind() {
@@ -20,7 +20,6 @@ fn create_reader(source: ReaderSource) -> Reader {
     Reader {
         reader: ArcSwapOption::from_pointee(source),
         ip_version,
-        path_cache: Mutex::new(VecDeque::new()),
     }
 }
 
