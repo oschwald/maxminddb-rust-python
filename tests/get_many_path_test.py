@@ -81,3 +81,10 @@ def test_get_many_path_closed_db() -> None:
 
     with pytest.raises(ValueError, match="closed"):
         reader.get_many_path(["81.2.69.142"], ("country", "iso_code"))
+
+
+def test_get_many_path_rejects_str_ips_before_parsing_path() -> None:
+    with maxminddb_rust.open_database(city_db_path()) as reader, pytest.raises(
+        TypeError, match="ips must be an iterable"
+    ):
+        reader.get_many_path("81.2.69.142", "country")  # type: ignore[arg-type]

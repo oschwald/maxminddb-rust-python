@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 from ipaddress import ip_address
 from pathlib import Path
 
@@ -91,3 +92,40 @@ def test_get_many_rejects_ipv6_in_ipv4_database() -> None:
         match="You attempted to look up an IPv6 address in an IPv4-only database",
     ):
         reader.get_many(["1.1.1.1", "2001::"])
+
+
+def test_get_many_handles_mutating_input_list() -> None:
+    db_path = Path(__file__).parent / "data" / "test-data" / "GeoIP2-City-Test.mmdb"
+    ips: list[object] = []
+
+    def get_ip(_self: object) -> int:
+        ips.clear()
+        return int(ip_address("81.2.69.142"))
+
+    shrink_type = type("IPv4Address", (), {"_ip": property(get_ip)})
+    ips[:] = [shrink_type(), "1.1.1.1", "81.2.69.142"]
+
+    with maxminddb_rust.open_database(db_path) as reader:
+        results = reader.get_many(ips)  # type: ignore[arg-type]
+        assert results == [reader.get("81.2.69.142")]
+
+
+def test_get_many_result_list_is_not_exposed_half_built() -> None:
+    db_path = Path(__file__).parent / "data" / "test-data" / "GeoIP2-City-Test.mmdb"
+
+    def get_ip(_self: object) -> int:
+        # Iterating a list with an unfilled NULL slot would crash.
+        for obj in gc.get_objects():
+            if type(obj) is list:
+                for _ in obj:
+                    pass
+        return int(ip_address("81.2.69.142"))
+
+    gc_walk_type = type("IPv4Address", (), {"_ip": property(get_ip)})
+    ips = ["81.2.69.142", gc_walk_type(), "1.1.1.1"]
+
+    with maxminddb_rust.open_database(db_path) as reader:
+        expected = [reader.get(ip) for ip in ips]
+        assert reader.get_many(ips) == expected  # type: ignore[arg-type]
+        expected_paths = [reader.get_path(ip, ("country",)) for ip in ips]
+        assert reader.get_many_path(ips, ("country",)) == expected_paths  # type: ignore[arg-type]

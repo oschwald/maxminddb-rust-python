@@ -52,6 +52,7 @@ const ERR_CLOSED_DB: &str = "Attempt to read from a closed MaxMind DB.";
 const ERR_BAD_DATA: &str =
     "The MaxMind DB file's data section contains bad data (unknown data type or corrupt data)";
 const ERR_BAD_DATABASE_ARG: &str = "database must be a string, PathLike, or file descriptor";
+const ERR_IPS_ITERABLE: &str = "ips must be an iterable of strings or ipaddress objects";
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum OpenMode {
@@ -344,38 +345,18 @@ impl Reader {
     ///     This method keeps the GIL for the duration of the batch. For better
     ///     concurrency with other Python threads, consider smaller batch sizes,
     ///     per-item lookups, or running lookups in a separate worker thread.
-    fn get_many(&self, py: Python, ips: &Bound<'_, PyAny>) -> PyResult<Vec<Py<PyAny>>> {
+    fn get_many(&self, py: Python, ips: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         // Keep work under the GIL for lower per-item overhead; callers wanting
         // concurrent Python execution should prefer smaller batches or threading.
         let reader = self.reader.load();
         let reader = reader
             .as_ref()
             .ok_or_else(|| PyValueError::new_err(ERR_CLOSED_DB))?;
+        reject_str_ips(ips)?;
 
-        if is_bytes_like_or_string(ips) {
-            return Err(PyTypeError::new_err(
-                "ips must be an iterable of strings or ipaddress objects",
-            ));
-        }
-
-        if let Ok(list) = ips.cast::<PyList>() {
-            return self.get_many_from_items(py, reader, list.iter(), list.len());
-        }
-
-        if let Ok(tuple) = ips.cast::<PyTuple>() {
-            return self.get_many_from_items(py, reader, tuple.iter(), tuple.len());
-        }
-
-        let iterator = ips.try_iter().map_err(|_| {
-            PyTypeError::new_err("ips must be an iterable of strings or ipaddress objects")
-        })?;
-        let mut objects = Vec::with_capacity(ips.len().unwrap_or(0));
-        for ip in iterator {
-            let ip_addr = self.parse_lookup_ip(&ip?)?;
-            objects.push(self.lookup_result_to_python(py, reader.lookup(ip_addr))?);
-        }
-
-        Ok(objects)
+        self.lookup_many(py, ips, |ip_addr| {
+            self.lookup_result_to_python(py, reader.lookup(ip_addr))
+        })
     }
 
     /// Query the database for a specific path for multiple IP addresses.
@@ -403,53 +384,19 @@ impl Reader {
         py: Python,
         ips: &Bound<'_, PyAny>,
         path: &Bound<'_, PyAny>,
-    ) -> PyResult<Vec<Py<PyAny>>> {
+    ) -> PyResult<Py<PyAny>> {
         let reader = self.reader.load();
         let reader = reader
             .as_ref()
             .ok_or_else(|| PyValueError::new_err(ERR_CLOSED_DB))?;
-
-        if is_bytes_like_or_string(ips) {
-            return Err(PyTypeError::new_err(
-                "ips must be an iterable of strings or ipaddress objects",
-            ));
-        }
+        reject_str_ips(ips)?;
 
         let owned_path = self.get_or_parse_path(path)?;
         let path_elements = path_elements_from_owned_path(&owned_path);
 
-        if let Ok(list) = ips.cast::<PyList>() {
-            return self.get_many_path_from_items(
-                py,
-                reader,
-                list.iter(),
-                list.len(),
-                &path_elements,
-            );
-        }
-
-        if let Ok(tuple) = ips.cast::<PyTuple>() {
-            return self.get_many_path_from_items(
-                py,
-                reader,
-                tuple.iter(),
-                tuple.len(),
-                &path_elements,
-            );
-        }
-
-        let iterator = ips.try_iter().map_err(|_| {
-            PyTypeError::new_err("ips must be an iterable of strings or ipaddress objects")
-        })?;
-        let mut objects = Vec::with_capacity(ips.len().unwrap_or(0));
-        for ip in iterator {
-            let ip_addr = self.parse_lookup_ip(&ip?)?;
-            objects.push(
-                self.lookup_result_to_python(py, reader.lookup_path(ip_addr, &path_elements))?,
-            );
-        }
-
-        Ok(objects)
+        self.lookup_many(py, ips, |ip_addr| {
+            self.lookup_result_to_python(py, reader.lookup_path(ip_addr, &path_elements))
+        })
     }
 
     /// Get metadata about the MaxMind DB database.
@@ -702,38 +649,44 @@ impl Reader {
             .map(|(_, cached_path)| Arc::clone(cached_path))
     }
 
-    fn get_many_from_items<'py>(
+    /// Look up each address in `ips` and return the results as a list.
+    fn lookup_many(
         &self,
-        py: Python<'py>,
-        reader: &ReaderSource,
-        items: impl IntoIterator<Item = Bound<'py, PyAny>>,
-        capacity: usize,
-    ) -> PyResult<Vec<Py<PyAny>>> {
-        let mut objects = Vec::with_capacity(capacity);
-        for ip in items {
-            let ip_addr = self.parse_lookup_ip(&ip)?;
-            objects.push(self.lookup_result_to_python(py, reader.lookup(ip_addr))?);
+        py: Python<'_>,
+        ips: &Bound<'_, PyAny>,
+        mut lookup: impl FnMut(IpAddr) -> PyResult<Py<PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        let mut objects;
+        if let Ok(list) = ips.cast::<PyList>() {
+            objects = Vec::with_capacity(list.len());
+            for ip in list.iter() {
+                objects.push(lookup(self.parse_lookup_ip(&ip)?)?);
+            }
+        } else if let Ok(tuple) = ips.cast::<PyTuple>() {
+            objects = Vec::with_capacity(tuple.len());
+            for ip in tuple.as_slice() {
+                objects.push(lookup(self.parse_lookup_ip(ip)?)?);
+            }
+        } else {
+            let iterator = ips
+                .try_iter()
+                .map_err(|_| PyTypeError::new_err(ERR_IPS_ITERABLE))?;
+            objects = Vec::with_capacity(ips.len().unwrap_or(0));
+            for ip in iterator {
+                objects.push(lookup(self.parse_lookup_ip(&ip?)?)?);
+            }
         }
-        Ok(objects)
+        Ok(PyList::new(py, objects)?.into_any().unbind())
     }
+}
 
-    fn get_many_path_from_items<'py>(
-        &self,
-        py: Python<'py>,
-        reader: &ReaderSource,
-        items: impl IntoIterator<Item = Bound<'py, PyAny>>,
-        capacity: usize,
-        path_elements: &[PathElement<'_>],
-    ) -> PyResult<Vec<Py<PyAny>>> {
-        let mut objects = Vec::with_capacity(capacity);
-        for ip in items {
-            let ip_addr = self.parse_lookup_ip(&ip)?;
-            objects.push(
-                self.lookup_result_to_python(py, reader.lookup_path(ip_addr, path_elements))?,
-            );
-        }
-        Ok(objects)
+/// Reject a str or bytes-like `ips`, which would otherwise iterate by character.
+#[inline]
+fn reject_str_ips(ips: &Bound<'_, PyAny>) -> PyResult<()> {
+    if is_bytes_like_or_string(ips) {
+        return Err(PyTypeError::new_err(ERR_IPS_ITERABLE));
     }
+    Ok(())
 }
 
 #[inline]
