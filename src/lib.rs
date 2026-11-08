@@ -716,7 +716,9 @@ impl Reader {
             let iterator = ips
                 .try_iter()
                 .map_err(|_| PyTypeError::new_err(ERR_IPS_ITERABLE))?;
-            objects = Vec::with_capacity(ips.len().unwrap_or(0));
+            // Do not pre-size from `__len__`: a user iterable can report any
+            // length, and a huge one would overflow or exhaust the allocation.
+            objects = Vec::new();
             for ip in iterator {
                 objects.push(lookup(self.parse_lookup_ip(&ip?)?)?);
             }

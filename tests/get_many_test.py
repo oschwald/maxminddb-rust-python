@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import gc
+import sys
 from ipaddress import ip_address
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 import maxminddb_rust
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 def test_get_many_matches_individual_get_and_preserves_order() -> None:
@@ -129,3 +134,25 @@ def test_get_many_result_list_is_not_exposed_half_built() -> None:
         assert reader.get_many(ips) == expected  # type: ignore[arg-type]
         expected_paths = [reader.get_path(ip, ("country",)) for ip in ips]
         assert reader.get_many_path(ips, ("country",)) == expected_paths  # type: ignore[arg-type]
+
+
+class _MisleadingLength:
+    """An iterable whose __len__ is far larger than what it yields."""
+
+    def __init__(self, items: list[str]) -> None:
+        self.items = items
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.items)
+
+    def __len__(self) -> int:
+        return sys.maxsize
+
+
+def test_get_many_does_not_trust_len_of_generic_iterable() -> None:
+    db_path = Path(__file__).parent / "data" / "test-data" / "GeoIP2-City-Test.mmdb"
+
+    with maxminddb_rust.open_database(db_path) as reader:
+        ips = _MisleadingLength(["81.2.69.142"])
+        assert reader.get_many(ips) == [reader.get("81.2.69.142")]  # type: ignore[arg-type]
+        assert reader.get_many_path(ips, ("country", "iso_code")) == ["GB"]  # type: ignore[arg-type]
