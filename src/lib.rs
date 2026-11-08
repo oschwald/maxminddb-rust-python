@@ -713,9 +713,18 @@ impl Reader {
                 objects.push(lookup(self.parse_lookup_ip(ip)?)?);
             }
         } else {
-            let iterator = ips
-                .try_iter()
-                .map_err(|_| PyTypeError::new_err(ERR_IPS_ITERABLE))?;
+            // Replace a TypeError, such as "not iterable", with a clearer
+            // message and keep the original as its cause. Keep any other
+            // error that `__iter__` raises as it is.
+            let iterator = ips.try_iter().map_err(|err| {
+                if err.is_instance_of::<PyTypeError>(py) {
+                    let type_err = PyTypeError::new_err(ERR_IPS_ITERABLE);
+                    type_err.set_cause(py, Some(err));
+                    type_err
+                } else {
+                    err
+                }
+            })?;
             // Do not pre-size from `__len__`: a user iterable can report any
             // length, and a huge one would overflow or exhaust the allocation.
             objects = Vec::new();

@@ -156,3 +156,31 @@ def test_get_many_does_not_trust_len_of_generic_iterable() -> None:
         ips = _MisleadingLength(["81.2.69.142"])
         assert reader.get_many(ips) == [reader.get("81.2.69.142")]  # type: ignore[arg-type]
         assert reader.get_many_path(ips, ("country", "iso_code")) == ["GB"]  # type: ignore[arg-type]
+
+
+class _FailingIter:
+    def __iter__(self) -> Iterator[str]:
+        msg = "iteration failed"
+        raise RuntimeError(msg)
+
+
+class _TypeErrorIter:
+    def __iter__(self) -> Iterator[str]:
+        msg = "bad config"
+        raise TypeError(msg)
+
+
+def test_get_many_keeps_error_raised_by_iter() -> None:
+    db_path = Path(__file__).parent / "data" / "test-data" / "GeoIP2-City-Test.mmdb"
+
+    with maxminddb_rust.open_database(db_path) as reader:
+        with pytest.raises(RuntimeError, match="iteration failed"):
+            reader.get_many(_FailingIter())  # type: ignore[arg-type]
+        with pytest.raises(RuntimeError, match="iteration failed"):
+            reader.get_many_path(_FailingIter(), ("country",))  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="ips must be an iterable"):
+            reader.get_many(42)  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="ips must be an iterable") as excinfo:
+            reader.get_many(_TypeErrorIter())  # type: ignore[arg-type]
+        assert isinstance(excinfo.value.__cause__, TypeError)
+        assert str(excinfo.value.__cause__) == "bad config"
