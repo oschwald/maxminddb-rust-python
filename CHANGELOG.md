@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Updated PyO3 from 0.29 to 0.30. Calls to `open_database` are faster on
+  CPython 3.11 and later. The garbage collector now traverses the extension's
+  class objects, which fixes a possible memory leak of those classes.
+
 ### Removed
 
 - Dropped support for Python 3.8, which reached end of life in October 2024.
