@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated PyO3 from 0.29 to 0.30. Calls to `open_database` are faster on
   CPython 3.11 and later. The garbage collector now traverses the extension's
   class objects, which fixes a possible memory leak of those classes.
+- Updated Rust and Python dependencies, GitHub Actions, the Pyodide build, and
+  the MaxMind-DB test submodule. The CodeQL action is now pinned to a commit
+  SHA like the other actions.
 
 ### Removed
 
