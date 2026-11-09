@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.0] - 2026-11-08
 
 ### Added
 
@@ -21,11 +21,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated Rust and Python dependencies, GitHub Actions, the Pyodide build, and
   the MaxMind-DB test submodule. The CodeQL action is now pinned to a commit
   SHA like the other actions.
+- `get_path()` and `get_many_path()` now cache up to 32 parsed tuple paths per
+  thread instead of per `Reader`, so cache hits take no lock.
+- Each thread that decodes records keeps caches of up to 2,560 short Python
+  strings and map keys, using about 120 KB of tables, until the thread exits.
+
+### Performance
+
+- `get()`, `get_many()`, and lookups with `ipaddress` objects are about 20%
+  faster, and iteration is about 40% faster, measured against 0.8.0 with a
+  GeoIP2 City database on Python 3.14.
+- Repeated strings and map keys in records reuse cached Python strings.
+- Iteration builds `ipaddress` network objects without calling their
+  constructors. Each iterator first checks that the classes are the unpatched
+  standard library classes and that sample networks match. Otherwise it calls
+  the constructors, so patched or mocked classes behave as before.
 
 ### Removed
 
 - Dropped support for Python 3.8, which reached end of life in October 2024.
   PyO3 0.30 no longer supports it. Python 3.9 or later is now required.
+
+### Fixed
+
+- `get_many()` and `get_many_path()` no longer size the result from the
+  `__len__` of a generic iterable. A length such as `sys.maxsize` made them
+  panic with "capacity overflow" before reading any item.
+- An error raised by the `__iter__` of the `ips` argument now propagates.
+  Before, every error became a `TypeError`. A `TypeError`, such as "object is
+  not iterable", still gets the "ips must be an iterable" message and keeps
+  the original error as its cause.
+- `get_many()` and `get_many_path()` now iterate a list or tuple subclass that
+  overrides `__iter__`, instead of reading its contents directly.
+- An error raised while reading `_ip` from an IP address object, such as a
+  `RuntimeError` from a property, now propagates. The lookup falls back to the
+  object's `packed` value only when `_ip` is missing or is not a usable int.
 
 ## [0.8.0] - 2026-09-12
 
@@ -258,7 +288,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python 3.8+
 - CPython implementation
 
-[Unreleased]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.8.0...HEAD
+[0.9.0]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.5.0...v0.6.0
