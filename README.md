@@ -190,13 +190,13 @@ memory-mapped reader as `MODE_MMAP`.
 
 The `examples/` directory contains complete working examples:
 
-- **[basic_usage.py](examples/basic_usage.py)**: simple IP lookups, metadata
+- **[basic_usage.py](https://github.com/oschwald/maxminddb-rust-python/blob/main/examples/basic_usage.py)**: simple IP lookups, metadata
   access, and database lifecycle
-- **[context_manager.py](examples/context_manager.py)**:
+- **[context_manager.py](https://github.com/oschwald/maxminddb-rust-python/blob/main/examples/context_manager.py)**:
   using `with` for automatic cleanup
-- **[iterator_demo.py](examples/iterator_demo.py)**:
+- **[iterator_demo.py](https://github.com/oschwald/maxminddb-rust-python/blob/main/examples/iterator_demo.py)**:
   iterating over all networks in the database
-- **[batch_processing.py](examples/batch_processing.py)**: batch lookups with
+- **[batch_processing.py](https://github.com/oschwald/maxminddb-rust-python/blob/main/examples/batch_processing.py)**: batch lookups with
   `get_many()`
 
 Run any example:
@@ -219,9 +219,9 @@ uv run python examples/batch_processing.py
 
 - **Type hints**: full type stub file (`maxminddb_rust.pyi`) is included for
   IDE autocomplete and type checking
-- **Changelog**: see [CHANGELOG.md](CHANGELOG.md) for version history and
+- **Changelog**: see [CHANGELOG.md](https://github.com/oschwald/maxminddb-rust-python/blob/main/CHANGELOG.md) for version history and
   release notes
-- **Migration Guide**: see [MIGRATION.md](MIGRATION.md) for migrating from the
+- **Migration Guide**: see [MIGRATION.md](https://github.com/oschwald/maxminddb-rust-python/blob/main/MIGRATION.md) for migrating from the
   official `maxminddb` package
 
 ## Benchmarking
@@ -284,13 +284,13 @@ uv run precious lint .
 ```
 
 For upstream test compatibility and syncing instructions, see
-[tests/maxmind/README.md](tests/maxmind/README.md).
+[tests/maxmind/README.md](https://github.com/oschwald/maxminddb-rust-python/blob/main/tests/maxmind/README.md).
 
 ## License
 
-ISC License. See [LICENSE](LICENSE) for details.
+ISC License. See [LICENSE](https://github.com/oschwald/maxminddb-rust-python/blob/main/LICENSE) for details.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code quality
+See [CONTRIBUTING.md](https://github.com/oschwald/maxminddb-rust-python/blob/main/CONTRIBUTING.md) for development setup, code quality
 guidelines, and pull request procedures.
