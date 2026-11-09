@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added Python 3.15 support, with wheels for the standard and free-threaded
   builds. CI now tests 3.15 and free-threaded 3.15.
+- Releases now include free-threaded wheels for Windows ARM64.
 
 ### Changed
 
