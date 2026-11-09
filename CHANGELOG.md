@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added Python 3.15 support, with wheels for the standard and free-threaded
+  builds. CI now tests 3.15 and free-threaded 3.15.
+- Releases now include free-threaded wheels for Windows ARM64.
+
+### Changed
+
+- Updated PyO3 from 0.29 to 0.30. Calls to `open_database` are faster on
+  CPython 3.11 and later. The garbage collector now traverses the extension's
+  class objects, which fixes a possible memory leak of those classes.
+- Updated Rust and Python dependencies, GitHub Actions, the Pyodide build, and
+  the MaxMind-DB test submodule. The CodeQL action is now pinned to a commit
+  SHA like the other actions.
+
+### Removed
+
+- Dropped support for Python 3.8, which reached end of life in October 2024.
+  PyO3 0.30 no longer supports it. Python 3.9 or later is now required.
+
 ## [0.8.0] - 2026-09-12
 
 ### Changed
@@ -236,6 +258,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python 3.8+
 - CPython implementation
 
+[Unreleased]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.8.0...HEAD
 [0.8.0]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.5.0...v0.6.0

@@ -72,8 +72,9 @@ def test_get_path_rejects_bool_path_element() -> None:
     db_path = (
         Path(__file__).parent / "data" / "test-data" / "MaxMind-DB-test-decoder.mmdb"
     )
-    with maxminddb_rust.open_database(db_path) as reader, pytest.raises(
-        TypeError, match="Path elements must be strings or integers"
+    with (
+        maxminddb_rust.open_database(db_path) as reader,
+        pytest.raises(TypeError, match="Path elements must be strings or integers"),
     ):
         reader.get_path("1.1.1.1", ("array", True))
 

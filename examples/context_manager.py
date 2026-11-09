@@ -70,9 +70,10 @@ def multiple_databases() -> None:
     country_db = "/var/lib/GeoIP/GeoLite2-Country.mmdb"
 
     # Open multiple databases with nested context managers
-    with maxminddb_rust.open_database(
-        city_db
-    ) as city_reader, maxminddb_rust.open_database(country_db) as country_reader:
+    with (
+        maxminddb_rust.open_database(city_db) as city_reader,
+        maxminddb_rust.open_database(country_db) as country_reader,
+    ):
         ip = "8.8.8.8"
         print(f"   Looking up {ip} in both databases:")
 

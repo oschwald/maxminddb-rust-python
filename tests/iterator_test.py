@@ -8,12 +8,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
+import pytest
+
 import maxminddb_rust
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    import pytest
 
 
 def test_iterator_networks_preserve_hosts_behavior() -> None:
@@ -221,6 +221,28 @@ with maxminddb_rust.open_database(sys.argv[1]) as reader:
     subprocess.run(  # noqa: S603 - Fixed argument vector; no shell.
         [sys.executable, "-c", code, str(db_path)], check=True
     )
+
+
+@pytest.mark.parametrize("error", [AttributeError, TypeError, ValueError])
+def test_iterator_uses_constructors_when_network_check_raises(
+    monkeypatch: pytest.MonkeyPatch, error: type[Exception]
+) -> None:
+    # These errors mean direct construction does not fit this Python, for
+    # example if a later version drops the IPv6Address _scope_id slot. The
+    # classes keep the stdlib constructors, so the error comes from a sample.
+    def failing_hash(_self: object) -> int:
+        msg = "mismatch"
+        raise error(msg)
+
+    monkeypatch.setattr(ipaddress.IPv6Network, "__hash__", failing_hash)
+    db_path = (
+        Path(__file__).parent / "data" / "test-data" / "MaxMind-DB-test-ipv6-24.mmdb"
+    )
+    with maxminddb_rust.open_database(db_path) as reader:
+        nets = [net for net, _ in reader if net.prefixlen == net.max_prefixlen]
+    assert nets
+    # The constructors set hosts to a lambda. The direct path does not.
+    assert all(net.hosts.__name__ == "<lambda>" for net in nets)
 
 
 def test_iterator_propagates_unexpected_network_check_errors() -> None:

@@ -29,6 +29,15 @@ BAD_DATA_PATHS = sorted(
     set((DATA_DIR / "bad-data").rglob("*.mmdb"))
     - {*EMPTY_METADATA_PATHS, UNREACHABLE_CORRUPTION}
 )
+# The metadata must not repeat a key. The Rust crate rejects a repeated
+# top-level key, but it keeps one value of a repeated language key in the
+# description map. Strict, so the test fails once the crate rejects it.
+REPEATED_DESCRIPTION_KEY = (
+    DATA_DIR
+    / "bad-data"
+    / "libmaxminddb"
+    / "libmaxminddb-repeated-description-key.mmdb"
+)
 IP = "1.2.3.4"
 
 
@@ -56,7 +65,18 @@ def open_reader(path: Path, mode: int) -> Iterator[maxminddb.Reader]:
         yield reader
 
 
-@pytest.mark.parametrize("path", BAD_DATA_PATHS, ids=lambda path: path.name)
+def bad_data_param(path: Path) -> object:
+    if path == REPEATED_DESCRIPTION_KEY:
+        xfail = pytest.mark.xfail(
+            strict=True,
+            raises=pytest.fail.Exception,
+            reason="The Rust crate accepts a repeated description key.",
+        )
+        return pytest.param(path, id=path.name, marks=xfail)
+    return pytest.param(path, id=path.name)
+
+
+@pytest.mark.parametrize("path", [bad_data_param(path) for path in BAD_DATA_PATHS])
 def test_bad_data_corpus_raises_invalid_database_error(path: Path, mode: int) -> None:
     with pytest.raises(maxminddb.InvalidDatabaseError):
         read_bad_database(path, mode)
@@ -84,8 +104,9 @@ def test_empty_containers_at_end_of_metadata_are_valid(path: Path, mode: int) ->
 def test_lookup_resource_limits(limit: str, method: str, mode: int) -> None:
     path = TEST_DATA_DIR / f"MaxMind-DB-test-decoder-{limit}-limit-over.mmdb"
     args = (IP, ()) if method == "get_path" else (IP,)
-    with open_reader(path, mode) as reader, pytest.raises(
-        maxminddb.InvalidDatabaseError, match="bad data"
+    with (
+        open_reader(path, mode) as reader,
+        pytest.raises(maxminddb.InvalidDatabaseError, match="bad data"),
     ):
         getattr(reader, method)(*args)
 
@@ -101,8 +122,9 @@ def test_batch_resource_limits(
     path = TEST_DATA_DIR / f"MaxMind-DB-test-decoder-{limit}-limit-over.mmdb"
     ips = container([IP])
     args = (ips, ()) if method == "get_many_path" else (ips,)
-    with open_reader(path, mode) as reader, pytest.raises(
-        maxminddb.InvalidDatabaseError, match="bad data"
+    with (
+        open_reader(path, mode) as reader,
+        pytest.raises(maxminddb.InvalidDatabaseError, match="bad data"),
     ):
         getattr(reader, method)(*args)
 
@@ -110,8 +132,9 @@ def test_batch_resource_limits(
 @pytest.mark.parametrize("limit", ["value", "payload"])
 def test_iteration_resource_limits(limit: str, mode: int) -> None:
     path = TEST_DATA_DIR / f"MaxMind-DB-test-decoder-{limit}-limit-over.mmdb"
-    with open_reader(path, mode) as reader, pytest.raises(
-        maxminddb.InvalidDatabaseError, match="resource limit exceeded"
+    with (
+        open_reader(path, mode) as reader,
+        pytest.raises(maxminddb.InvalidDatabaseError, match="resource limit exceeded"),
     ):
         next(iter(reader))
 
@@ -140,15 +163,17 @@ def test_records_at_resource_limits_remain_readable(limit: str, mode: int) -> No
 def test_path_navigation_shares_payload_budget(method: str, mode: int) -> None:
     path = TEST_DATA_DIR / "MaxMind-DB-test-decode-path-shared-budget.mmdb"
     ip_arg = [IP] if method == "get_many_path" else IP
-    with open_reader(path, mode) as reader, pytest.raises(
-        maxminddb.InvalidDatabaseError, match="bad data"
+    with (
+        open_reader(path, mode) as reader,
+        pytest.raises(maxminddb.InvalidDatabaseError, match="bad data"),
     ):
         getattr(reader, method)(ip_arg, ("target",))
 
 
 def test_metadata_resource_limit(mode: int) -> None:
     path = TEST_DATA_DIR / "MaxMind-DB-test-metadata-payload-limit.mmdb"
-    with pytest.raises(
-        maxminddb.InvalidDatabaseError, match="valid MaxMind DB file"
-    ), open_reader(path, mode):
+    with (
+        pytest.raises(maxminddb.InvalidDatabaseError, match="valid MaxMind DB file"),
+        open_reader(path, mode),
+    ):
         pass

@@ -17,7 +17,7 @@ expected throughput in your environment.
 
 The reader is thread-safe and can be shared across threads. On standard CPython
 builds, CPU-bound lookups from Python threads remain constrained by the GIL.
-Free-threaded CPython 3.14 wheels allow lookup threads to run concurrently;
+Free-threaded CPython 3.14 and 3.15 wheels allow lookup threads to run concurrently;
 scaling depends on the database and workload.
 
 ## Features

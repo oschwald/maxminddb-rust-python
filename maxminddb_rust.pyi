@@ -4,10 +4,11 @@ This module provides a high-performance alternative to the maxminddb Python pack
 implemented in Rust using PyO3 with 100% API compatibility.
 """
 
+from collections.abc import Iterable, Iterator, Sequence
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 from os import PathLike
 from types import TracebackType
-from typing import Any, BinaryIO, Iterable, Iterator, Literal, Sequence
+from typing import Any, BinaryIO, Literal
 
 __all__ = [  # noqa: RUF022 - Match the extension export order.
     "Reader",

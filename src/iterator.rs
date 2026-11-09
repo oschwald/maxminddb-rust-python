@@ -85,7 +85,6 @@ struct IpaddressCache {
     ipv4_netmasks: Box<[Py<PyAny>]>,
     /// The netmask address for each IPv6 prefix length, 0 to 128.
     ipv6_netmasks: Box<[Py<PyAny>]>,
-    ipv6_has_scope_id: bool,
     single_host_returns_iter: bool,
     /// True if a class is not a type, a class has a patched constructor, or
     /// direct construction did not match the `ipaddress` constructors.
@@ -189,7 +188,6 @@ impl IpaddressCache {
             ipv6_address_cls: ipv6_address_cls.clone().unbind(),
             ipv4_netmasks: Box::default(),
             ipv6_netmasks: Box::default(),
-            ipv6_has_scope_id: false,
             single_host_returns_iter: false,
             use_constructors: true,
         };
@@ -211,7 +209,6 @@ impl IpaddressCache {
             .and_then(|ipv4| Ok((ipv4, netmasks(&ipv6_network_cls, 128)?)));
         match netmasks {
             Ok((ipv4_netmasks, ipv6_netmasks)) => {
-                cache.ipv6_has_scope_id = ipv6_netmasks[0].bind(py).hasattr("_scope_id")?;
                 cache.ipv4_netmasks = ipv4_netmasks;
                 cache.ipv6_netmasks = ipv6_netmasks;
                 cache.use_constructors = false;
@@ -262,7 +259,10 @@ impl IpaddressCache {
         let object_new = pyo3::intern!(py, "__new__");
         let addr_inst = addr_cls.call_method1(object_new, (addr_cls,))?;
         addr_inst.setattr(pyo3::intern!(py, "_ip"), addr_obj)?;
-        if is_v6 && self.ipv6_has_scope_id {
+        if is_v6 {
+            // Python 3.9 added the `_scope_id` slot. If a later version drops
+            // it, the network check fails, and the iterator uses the
+            // constructors.
             addr_inst.setattr(pyo3::intern!(py, "_scope_id"), py.None())?;
         }
 
