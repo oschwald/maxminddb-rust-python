@@ -132,8 +132,9 @@ class BaseTestReader(unittest.TestCase):
     def test_payload_amplification_is_rejected(self) -> None:
         # An array of 8,192 pointers to one 65,535-byte value. The value count
         # stays low, but copying each target would materialize about 512 MiB.
-        with _bounded(), self.assertRaisesRegex(
-            InvalidDatabaseError, self.payload_error
+        with (
+            _bounded(),
+            self.assertRaisesRegex(InvalidDatabaseError, self.payload_error),
         ):
             self._lookup_resource_record(
                 "MaxMind-DB-test-payload-amplification-dos.mmdb"
@@ -141,8 +142,9 @@ class BaseTestReader(unittest.TestCase):
 
     def test_payload_amplification_string_is_rejected(self) -> None:
         # The UTF-8 string variant, so the decode path for strings is exercised.
-        with _bounded(), self.assertRaisesRegex(
-            InvalidDatabaseError, self.payload_error
+        with (
+            _bounded(),
+            self.assertRaisesRegex(InvalidDatabaseError, self.payload_error),
         ):
             self._lookup_resource_record(
                 "MaxMind-DB-test-payload-amplification-dos-string.mmdb"
@@ -152,8 +154,9 @@ class BaseTestReader(unittest.TestCase):
         # 65,535 pointers to one 65,535-byte value. The record is exactly
         # 65,536 values under the flat rule, so only the payload budget can
         # reject it.
-        with _bounded(), self.assertRaisesRegex(
-            InvalidDatabaseError, self.payload_error
+        with (
+            _bounded(),
+            self.assertRaisesRegex(InvalidDatabaseError, self.payload_error),
         ):
             self._lookup_resource_record(
                 "MaxMind-DB-test-payload-amplification-dos-worst-case.mmdb"
@@ -182,16 +185,18 @@ class BaseTestReader(unittest.TestCase):
     def test_pointer_fan_out_fixture_is_rejected(self) -> None:
         # A full database whose record nests arrays of pointers to the level
         # below, the classic 2**depth fan-out.
-        with _bounded(), self.assertRaisesRegex(
-            InvalidDatabaseError, self.fan_out_error
+        with (
+            _bounded(),
+            self.assertRaisesRegex(InvalidDatabaseError, self.fan_out_error),
         ):
             self._lookup_resource_record("MaxMind-DB-test-pointer-decoder-dos.mmdb")
 
     def test_pointer_fan_out_ipv6_fixture_is_rejected(self) -> None:
         # The same fan-out in a conventional IPv6 database that maps the whole
         # address space to the record, so the IPv6 tree path is covered too.
-        with _bounded(), self.assertRaisesRegex(
-            InvalidDatabaseError, self.fan_out_error
+        with (
+            _bounded(),
+            self.assertRaisesRegex(InvalidDatabaseError, self.fan_out_error),
         ):
             self._lookup_resource_record(
                 "MaxMind-DB-test-pointer-decoder-dos-ipv6.mmdb", "2001:db8::1"
@@ -214,10 +219,13 @@ class BaseTestReader(unittest.TestCase):
 
     def test_metadata_payload_limit_is_enforced_on_open(self) -> None:
         # Metadata must stay within the payload limit when the database is opened.
-        with _bounded(), self.assertRaisesRegex(
-            InvalidDatabaseError, self.metadata_error
-        ), open_database(
-            f"{_TEST_DATA_DIR}/MaxMind-DB-test-metadata-payload-limit.mmdb", self.mode
+        with (
+            _bounded(),
+            self.assertRaisesRegex(InvalidDatabaseError, self.metadata_error),
+            open_database(
+                f"{_TEST_DATA_DIR}/MaxMind-DB-test-metadata-payload-limit.mmdb",
+                self.mode,
+            ),
         ):
             pass
 
@@ -674,10 +682,13 @@ class BaseTestReader(unittest.TestCase):
         reader = open_database(filename, self.mode)
         reader.close()
 
-        with self.assertRaisesRegex(
-            ValueError,
-            "Attempt to reopen a closed MaxMind DB",
-        ), reader:
+        with (
+            self.assertRaisesRegex(
+                ValueError,
+                "Attempt to reopen a closed MaxMind DB",
+            ),
+            reader,
+        ):
             pass
 
     def test_closed(self) -> None:

@@ -43,8 +43,9 @@ def test_get_many_path_accepts_tuple_input() -> None:
 
 
 def test_get_many_path_rejects_string_instead_of_iterable_of_ips() -> None:
-    with maxminddb_rust.open_database(city_db_path()) as reader, pytest.raises(
-        TypeError, match="iterable of strings or ipaddress objects"
+    with (
+        maxminddb_rust.open_database(city_db_path()) as reader,
+        pytest.raises(TypeError, match="iterable of strings or ipaddress objects"),
     ):
         reader.get_many_path(  # type: ignore[arg-type]
             "81.2.69.142", ("country", "iso_code")
@@ -61,16 +62,20 @@ def test_get_many_path_rejects_bytes_like_containers() -> None:
 
 
 def test_get_many_path_rejects_invalid_ip() -> None:
-    with maxminddb_rust.open_database(city_db_path()) as reader, pytest.raises(
-        ValueError,
-        match="'not_ip' does not appear to be an IPv4 or IPv6 address",
+    with (
+        maxminddb_rust.open_database(city_db_path()) as reader,
+        pytest.raises(
+            ValueError,
+            match="'not_ip' does not appear to be an IPv4 or IPv6 address",
+        ),
     ):
         reader.get_many_path(["81.2.69.142", "not_ip"], ("country", "iso_code"))
 
 
 def test_get_many_path_rejects_invalid_path() -> None:
-    with maxminddb_rust.open_database(city_db_path()) as reader, pytest.raises(
-        TypeError, match="Path elements must be strings or integers"
+    with (
+        maxminddb_rust.open_database(city_db_path()) as reader,
+        pytest.raises(TypeError, match="Path elements must be strings or integers"),
     ):
         reader.get_many_path(["81.2.69.142"], ("country", True))
 
@@ -105,7 +110,8 @@ def test_get_many_path_handles_mutated_path_list_and_reentrant_cache() -> None:
 
 
 def test_get_many_path_rejects_str_ips_before_parsing_path() -> None:
-    with maxminddb_rust.open_database(city_db_path()) as reader, pytest.raises(
-        TypeError, match="ips must be an iterable"
+    with (
+        maxminddb_rust.open_database(city_db_path()) as reader,
+        pytest.raises(TypeError, match="ips must be an iterable"),
     ):
         reader.get_many_path("81.2.69.142", "country")  # type: ignore[arg-type]

@@ -84,8 +84,9 @@ def test_empty_containers_at_end_of_metadata_are_valid(path: Path, mode: int) ->
 def test_lookup_resource_limits(limit: str, method: str, mode: int) -> None:
     path = TEST_DATA_DIR / f"MaxMind-DB-test-decoder-{limit}-limit-over.mmdb"
     args = (IP, ()) if method == "get_path" else (IP,)
-    with open_reader(path, mode) as reader, pytest.raises(
-        maxminddb.InvalidDatabaseError, match="bad data"
+    with (
+        open_reader(path, mode) as reader,
+        pytest.raises(maxminddb.InvalidDatabaseError, match="bad data"),
     ):
         getattr(reader, method)(*args)
 
@@ -101,8 +102,9 @@ def test_batch_resource_limits(
     path = TEST_DATA_DIR / f"MaxMind-DB-test-decoder-{limit}-limit-over.mmdb"
     ips = container([IP])
     args = (ips, ()) if method == "get_many_path" else (ips,)
-    with open_reader(path, mode) as reader, pytest.raises(
-        maxminddb.InvalidDatabaseError, match="bad data"
+    with (
+        open_reader(path, mode) as reader,
+        pytest.raises(maxminddb.InvalidDatabaseError, match="bad data"),
     ):
         getattr(reader, method)(*args)
 
@@ -110,8 +112,9 @@ def test_batch_resource_limits(
 @pytest.mark.parametrize("limit", ["value", "payload"])
 def test_iteration_resource_limits(limit: str, mode: int) -> None:
     path = TEST_DATA_DIR / f"MaxMind-DB-test-decoder-{limit}-limit-over.mmdb"
-    with open_reader(path, mode) as reader, pytest.raises(
-        maxminddb.InvalidDatabaseError, match="resource limit exceeded"
+    with (
+        open_reader(path, mode) as reader,
+        pytest.raises(maxminddb.InvalidDatabaseError, match="resource limit exceeded"),
     ):
         next(iter(reader))
 
@@ -140,15 +143,17 @@ def test_records_at_resource_limits_remain_readable(limit: str, mode: int) -> No
 def test_path_navigation_shares_payload_budget(method: str, mode: int) -> None:
     path = TEST_DATA_DIR / "MaxMind-DB-test-decode-path-shared-budget.mmdb"
     ip_arg = [IP] if method == "get_many_path" else IP
-    with open_reader(path, mode) as reader, pytest.raises(
-        maxminddb.InvalidDatabaseError, match="bad data"
+    with (
+        open_reader(path, mode) as reader,
+        pytest.raises(maxminddb.InvalidDatabaseError, match="bad data"),
     ):
         getattr(reader, method)(ip_arg, ("target",))
 
 
 def test_metadata_resource_limit(mode: int) -> None:
     path = TEST_DATA_DIR / "MaxMind-DB-test-metadata-payload-limit.mmdb"
-    with pytest.raises(
-        maxminddb.InvalidDatabaseError, match="valid MaxMind DB file"
-    ), open_reader(path, mode):
+    with (
+        pytest.raises(maxminddb.InvalidDatabaseError, match="valid MaxMind DB file"),
+        open_reader(path, mode),
+    ):
         pass
