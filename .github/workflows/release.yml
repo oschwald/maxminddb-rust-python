@@ -100,10 +100,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CIBW_BUILD: cp314-pyodide_wasm32
-      CIBW_DEPENDENCY_VERSIONS_PYODIDE: "packages: pyodide-build==0.35.0"
+      CIBW_DEPENDENCY_VERSIONS_PYODIDE: "packages: pyodide-build==0.39.3"
       CIBW_ENVIRONMENT: CARGO_PROFILE_RELEASE_PANIC=abort
       CIBW_PLATFORM: pyodide
-      CIBW_PYODIDE_VERSION: "314.0.0"
+      CIBW_PYODIDE_VERSION: "314.0.7"
       CIBW_TEST_COMMAND: >-
         python -c "import maxminddb_rust; reader =
         maxminddb_rust.open_database('{project}/tests/data/test-data/GeoIP2-City-Test.mmdb');
