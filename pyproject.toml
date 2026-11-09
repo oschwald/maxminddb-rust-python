@@ -40,6 +40,7 @@ Homepage = "https://github.com/oschwald/maxminddb-rust-python"
 Repository = "https://github.com/oschwald/maxminddb-rust-python"
 "Bug Tracker" = "https://github.com/oschwald/maxminddb-rust-python/issues"
 Changelog = "https://github.com/oschwald/maxminddb-rust-python/blob/main/CHANGELOG.md"
+Benchmarks = "https://github.com/oschwald/maxminddb-rust-python/blob/main/BENCHMARKS.md"
 "Migration Guide" = "https://github.com/oschwald/maxminddb-rust-python/blob/main/MIGRATION.md"
 Contributing = "https://github.com/oschwald/maxminddb-rust-python/blob/main/CONTRIBUTING.md"
 
