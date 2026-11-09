@@ -10,7 +10,7 @@ The latest sync was checked against upstream commit
 (3.2.0) on September 12, 2026. It adds the reader's payload amplification,
 pointer fan-out, resource-limit boundary, truncated search-tree, and invalid
 tree-metadata tests. Resource errors use this binding's `InvalidDatabaseError`
-messages, and the tests retain Python 3.8-compatible syntax and all supported
+messages, and the tests retain Python 3.9-compatible syntax and all supported
 open modes.
 
 The upstream resource-limit probe for older system `libmaxminddb` versions is

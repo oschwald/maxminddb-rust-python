@@ -65,7 +65,7 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist --interpreter ${{ matrix.python_versions || '3.8 3.9 3.10 3.11 3.12 3.13 3.14 3.14t' }}
+          args: --release --out dist --interpreter ${{ matrix.python_versions || '3.9 3.10 3.11 3.12 3.13 3.14 3.14t' }}
           sccache: "false"
           manylinux: auto
 
