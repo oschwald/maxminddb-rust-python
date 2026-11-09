@@ -1,54 +1,41 @@
 # maxminddb-rust
 
-A Rust-backed Python module for reading MaxMind DB files.
+[![PyPI](https://img.shields.io/pypi/v/maxminddb-rust)](https://pypi.org/project/maxminddb-rust/)
+[![Python versions](https://img.shields.io/pypi/pyversions/maxminddb-rust)](https://pypi.org/project/maxminddb-rust/)
+[![Tests](https://github.com/oschwald/maxminddb-rust-python/actions/workflows/test.yml/badge.svg)](https://github.com/oschwald/maxminddb-rust-python/actions/workflows/test.yml)
 
-It mirrors the public API of the official
-[`maxminddb`](https://github.com/maxmind/MaxMind-DB-Reader-python) package and
-keeps the same programming model with the `maxminddb_rust` import name.
+A fast Python reader for MaxMind DB files, written in Rust.
+
+It has the same API as the official
+[`maxminddb`](https://github.com/maxmind/MaxMind-DB-Reader-python) package, so
+switching usually means changing one import:
+
+```python
+import maxminddb_rust as maxminddb
+```
 
 ## Performance
 
-This project is intended to provide performance comparable to the `maxminddb` C
-extension while keeping API compatibility.
+In each case measured, maxminddb-rust is faster than the `maxminddb` C
+extension:
 
-Performance depends on the database, lookup pattern, and hardware. Run the
-benchmark scripts in `benchmarks/` against your own databases to measure
-expected throughput in your environment.
+| Operation                                  | maxminddb-rust | maxminddb (C) | Speedup |
+| ------------------------------------------ | -------------: | ------------: | ------: |
+| Full record, `get()`                       |        555,240 |       325,601 |    1.7x |
+| One field, `get_path()` vs `get()` + index |      4,040,362 |       321,567 |   12.6x |
+| Iterate networks                           |        624,090 |       287,401 |    2.2x |
+| `get()` on 8 threads, free-threaded 3.14t  |      3,017,043 |     2,040,533 |    1.5x |
+
+The values are operations per second with the GeoLite2 City database and
+Python 3.14 on one machine. Results depend on the database, the lookup pattern,
+and the hardware. [BENCHMARKS.md](https://github.com/oschwald/maxminddb-rust-python/blob/main/BENCHMARKS.md)
+describes the method, compares more readers, and shows how to run the
+benchmarks yourself.
 
 The reader is thread-safe and can be shared across threads. On standard CPython
 builds, CPU-bound lookups from Python threads remain constrained by the GIL.
-Free-threaded CPython 3.14 and 3.15 wheels allow lookup threads to run concurrently;
-scaling depends on the database and workload.
-
-## Features
-
-### API Compatibility
-
-This package provides API compatibility with the official
-[`maxminddb`](https://github.com/maxmind/MaxMind-DB-Reader-python) Python
-module.
-
-Supported:
-
-- `Reader` class with `get()`, `get_with_prefix_len()`, `metadata()`, and
-  `close()` methods
-- `open_database()` function
-- Context manager support (`with` statement)
-- MODE\_\* constants (`MODE_AUTO`, `MODE_MMAP`, `MODE_MMAP_EXT`, `MODE_FILE`,
-  `MODE_MEMORY`, and `MODE_FD`)
-- `InvalidDatabaseError` exception
-- `Metadata` class with all attributes and computed properties
-- Support for string IP addresses and `ipaddress.IPv4Address`/`IPv6Address`
-  objects
-- `closed` attribute
-- Iterator support (`__iter__`) for iterating all database records
-
-Extensions (not in the original package):
-
-- `get_many()` for batch lookups
-- `get_path()` for retrieving a specific field from a record (for example,
-  `('country', 'iso_code')`) without decoding the entire record
-- `get_many_path()` for retrieving a specific field for many IP addresses
+Free-threaded CPython 3.14 and 3.15 wheels allow lookup threads to run
+concurrently.
 
 ## Installation
 
@@ -186,6 +173,36 @@ integer OS file descriptors are not accepted directly.
 does not have a separate C extension backend, so it uses the same Rust
 memory-mapped reader as `MODE_MMAP`.
 
+## Features
+
+### API Compatibility
+
+This package provides API compatibility with the official
+[`maxminddb`](https://github.com/maxmind/MaxMind-DB-Reader-python) Python
+module.
+
+Supported:
+
+- `Reader` class with `get()`, `get_with_prefix_len()`, `metadata()`, and
+  `close()` methods
+- `open_database()` function
+- Context manager support (`with` statement)
+- MODE\_\* constants (`MODE_AUTO`, `MODE_MMAP`, `MODE_MMAP_EXT`, `MODE_FILE`,
+  `MODE_MEMORY`, and `MODE_FD`)
+- `InvalidDatabaseError` exception
+- `Metadata` class with all attributes and computed properties
+- Support for string IP addresses and `ipaddress.IPv4Address`/`IPv6Address`
+  objects
+- `closed` attribute
+- Iterator support (`__iter__`) for iterating all database records
+
+Extensions (not in the original package):
+
+- `get_many()` for batch lookups
+- `get_path()` for retrieving a specific field from a record (for example,
+  `('country', 'iso_code')`) without decoding the entire record
+- `get_many_path()` for retrieving a specific field for many IP addresses
+
 ## Examples
 
 The `examples/` directory contains complete working examples:
@@ -249,6 +266,9 @@ uv run python benchmarks/benchmark_parallel.py --count 500000 --workers 1,2,4,8
 
 # get() vs get_path() benchmark
 uv run python benchmarks/benchmark_path.py --count 250000
+
+# Compare with other Python MaxMind DB readers (see BENCHMARKS.md)
+uv run --with maxminddb --with maxminddb-zig python benchmarks/compare_readers.py
 
 # Compare benchmark throughput between two git refs
 uv run python benchmarks/compare_refs.py --baseline-ref origin/main --candidate-ref HEAD
