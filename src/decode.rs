@@ -3,16 +3,24 @@ use pyo3::{
     prelude::*,
     types::{PyBytes, PyDict, PyList, PyString},
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::FxBuildHasher;
 use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
-use std::{cell::RefCell, fmt};
+use std::{
+    cell::RefCell,
+    fmt,
+    hash::{BuildHasher, Hasher},
+};
 
 thread_local! {
-    static PY_MAP_KEY_CACHE: RefCell<FxHashMap<Vec<u8>, Py<PyString>>> =
-        RefCell::new(FxHashMap::default());
+    static PY_MAP_KEY_CACHE: RefCell<DirectStringCache<PY_MAP_KEY_CACHE_SLOTS>> =
+        RefCell::new(DirectStringCache::new());
+    static PY_STRING_VALUE_CACHE: RefCell<DirectStringCache<PY_STRING_CACHE_SLOTS>> =
+        RefCell::new(DirectStringCache::new());
 }
 
-const PY_MAP_KEY_CACHE_MAX: usize = 256;
+const PY_MAP_KEY_CACHE_SLOTS: usize = 512;
+const PY_STRING_CACHE_MAX_LEN: usize = 32;
+const PY_STRING_CACHE_SLOTS: usize = 2048;
 
 /// Wrapper that owns the Python object produced by deserializing a MaxMind record.
 #[derive(Debug)]
@@ -220,7 +228,7 @@ impl<'de, 'py> Visitor<'de> for PyStringBytesVisitor<'py> {
     where
         E: de::Error,
     {
-        bound_to_value(PyString::from_bytes(self.py, value).map(|value| value.into_any().unbind()))
+        bound_to_value(cached_string_value(self.py, value))
     }
 }
 
@@ -268,17 +276,100 @@ fn set_cached_map_item(
     key: &[u8],
     value: Py<PyAny>,
 ) -> PyResult<()> {
+    if key.len() > PY_STRING_CACHE_MAX_LEN {
+        return dict.set_item(PyString::from_bytes(py, key)?, value);
+    }
     PY_MAP_KEY_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if let Some(existing) = cache.get(key) {
-            return dict.set_item(existing.bind(py), value);
-        }
-        if cache.len() >= PY_MAP_KEY_CACHE_MAX {
-            return dict.set_item(PyString::from_bytes(py, key)?, value);
-        }
-        let py_key = PyString::from_bytes(py, key)?.unbind();
-        let result = dict.set_item(py_key.bind(py), value);
-        cache.insert(key.to_vec(), py_key);
-        result
+        let slot = match cache.borrow().lookup(key) {
+            // Borrow the cached key instead of taking a new reference. This
+            // saves an incref and decref per map key. Holding the shared
+            // borrow across `set_item` is safe: it allocates no
+            // GC-tracked object, so it cannot start a GC pass. A duplicate
+            // key frees only an earlier decoded value, which has no
+            // finalizer.
+            Ok(cached) => return dict.set_item(cached.bind_borrowed(py), value),
+            Err(slot) => slot,
+        };
+        // Create the string with no borrow held. Invalid UTF-8 raises an
+        // error, creating it can trigger a GC pass, and a finalizer that
+        // decodes a record would find the cache borrowed and panic.
+        let py_key = PyString::from_bytes(py, key)?;
+        dict.set_item(&py_key, value)?;
+        cache.borrow_mut().insert(slot, key, py_key.unbind());
+        Ok(())
     })
+}
+
+fn cached_string_value(py: Python, value: &[u8]) -> PyResult<Py<PyAny>> {
+    if value.len() > PY_STRING_CACHE_MAX_LEN {
+        return Ok(PyString::from_bytes(py, value)?.into_any().unbind());
+    }
+    PY_STRING_VALUE_CACHE.with(|cache| {
+        let slot = match cache.borrow().lookup(value) {
+            Ok(cached) => return Ok(cached.clone_ref(py).into_any()),
+            Err(slot) => slot,
+        };
+        // See `set_cached_map_item` for why no borrow is held here.
+        let py_str = PyString::from_bytes(py, value)?.unbind();
+        let result = py_str.clone_ref(py).into_any();
+        cache.borrow_mut().insert(slot, value, py_str);
+        Ok(result)
+    })
+}
+
+struct StringCacheEntry {
+    len: u8,
+    bytes: [u8; PY_STRING_CACHE_MAX_LEN],
+    value: Option<Py<PyString>>,
+}
+
+struct DirectStringCache<const SLOTS: usize> {
+    entries: Box<[StringCacheEntry]>,
+}
+
+impl<const SLOTS: usize> DirectStringCache<SLOTS> {
+    fn new() -> Self {
+        // `slot_index` masks the hash, so the slot count must be a power of two.
+        const { assert!(SLOTS.is_power_of_two()) };
+        let mut entries = Vec::with_capacity(SLOTS);
+        for _ in 0..SLOTS {
+            entries.push(StringCacheEntry {
+                len: 0,
+                bytes: [0; PY_STRING_CACHE_MAX_LEN],
+                value: None,
+            });
+        }
+        Self {
+            entries: entries.into_boxed_slice(),
+        }
+    }
+
+    /// Return the cached string for `bytes`, or the slot to insert it into
+    /// on a miss. `bytes` must fit in a cache entry.
+    #[inline]
+    fn lookup(&self, bytes: &[u8]) -> Result<&Py<PyString>, usize> {
+        let slot = Self::slot_index(bytes);
+        let entry = &self.entries[slot];
+        let hit = usize::from(entry.len) == bytes.len() && &entry.bytes[..bytes.len()] == bytes;
+        match entry.value {
+            Some(ref cached) if hit => Ok(cached),
+            _ => Err(slot),
+        }
+    }
+
+    /// Replace the entry in `slot` with `value` for `bytes`.
+    #[inline]
+    fn insert(&mut self, slot: usize, bytes: &[u8], value: Py<PyString>) {
+        let entry = &mut self.entries[slot];
+        entry.len = bytes.len() as u8;
+        entry.bytes[..bytes.len()].copy_from_slice(bytes);
+        entry.value = Some(value);
+    }
+
+    #[inline(always)]
+    fn slot_index(value: &[u8]) -> usize {
+        let mut hasher = FxBuildHasher.build_hasher();
+        hasher.write(value);
+        (hasher.finish() as usize) & (SLOTS - 1)
+    }
 }

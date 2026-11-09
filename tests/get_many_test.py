@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import gc
+import sys
 from ipaddress import ip_address
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 import maxminddb_rust
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 def test_get_many_matches_individual_get_and_preserves_order() -> None:
@@ -91,3 +97,106 @@ def test_get_many_rejects_ipv6_in_ipv4_database() -> None:
         match="You attempted to look up an IPv6 address in an IPv4-only database",
     ):
         reader.get_many(["1.1.1.1", "2001::"])
+
+
+def test_get_many_handles_mutating_input_list() -> None:
+    db_path = Path(__file__).parent / "data" / "test-data" / "GeoIP2-City-Test.mmdb"
+    ips: list[object] = []
+
+    def get_ip(_self: object) -> int:
+        ips.clear()
+        return int(ip_address("81.2.69.142"))
+
+    shrink_type = type("IPv4Address", (), {"_ip": property(get_ip)})
+    ips[:] = [shrink_type(), "1.1.1.1", "81.2.69.142"]
+
+    with maxminddb_rust.open_database(db_path) as reader:
+        results = reader.get_many(ips)  # type: ignore[arg-type]
+        assert results == [reader.get("81.2.69.142")]
+
+
+def test_get_many_result_list_is_not_exposed_half_built() -> None:
+    db_path = Path(__file__).parent / "data" / "test-data" / "GeoIP2-City-Test.mmdb"
+
+    def get_ip(_self: object) -> int:
+        # Iterating a list with an unfilled NULL slot would crash.
+        for obj in gc.get_objects():
+            if type(obj) is list:
+                for _ in obj:
+                    pass
+        return int(ip_address("81.2.69.142"))
+
+    gc_walk_type = type("IPv4Address", (), {"_ip": property(get_ip)})
+    ips = ["81.2.69.142", gc_walk_type(), "1.1.1.1"]
+
+    with maxminddb_rust.open_database(db_path) as reader:
+        expected = [reader.get(ip) for ip in ips]
+        assert reader.get_many(ips) == expected  # type: ignore[arg-type]
+        expected_paths = [reader.get_path(ip, ("country",)) for ip in ips]
+        assert reader.get_many_path(ips, ("country",)) == expected_paths  # type: ignore[arg-type]
+
+
+class _MisleadingLength:
+    """An iterable whose __len__ is far larger than what it yields."""
+
+    def __init__(self, items: list[str]) -> None:
+        self.items = items
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.items)
+
+    def __len__(self) -> int:
+        return sys.maxsize
+
+
+def test_get_many_does_not_trust_len_of_generic_iterable() -> None:
+    db_path = Path(__file__).parent / "data" / "test-data" / "GeoIP2-City-Test.mmdb"
+
+    with maxminddb_rust.open_database(db_path) as reader:
+        ips = _MisleadingLength(["81.2.69.142"])
+        assert reader.get_many(ips) == [reader.get("81.2.69.142")]  # type: ignore[arg-type]
+        assert reader.get_many_path(ips, ("country", "iso_code")) == ["GB"]  # type: ignore[arg-type]
+
+
+class _FailingIter:
+    def __iter__(self) -> Iterator[str]:
+        msg = "iteration failed"
+        raise RuntimeError(msg)
+
+
+class _TypeErrorIter:
+    def __iter__(self) -> Iterator[str]:
+        msg = "bad config"
+        raise TypeError(msg)
+
+
+def test_get_many_keeps_error_raised_by_iter() -> None:
+    db_path = Path(__file__).parent / "data" / "test-data" / "GeoIP2-City-Test.mmdb"
+
+    with maxminddb_rust.open_database(db_path) as reader:
+        with pytest.raises(RuntimeError, match="iteration failed"):
+            reader.get_many(_FailingIter())  # type: ignore[arg-type]
+        with pytest.raises(RuntimeError, match="iteration failed"):
+            reader.get_many_path(_FailingIter(), ("country",))  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="ips must be an iterable"):
+            reader.get_many(42)  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="ips must be an iterable") as excinfo:
+            reader.get_many(_TypeErrorIter())  # type: ignore[arg-type]
+        assert isinstance(excinfo.value.__cause__, TypeError)
+        assert str(excinfo.value.__cause__) == "bad config"
+
+
+@pytest.mark.parametrize("base", [list, tuple])
+def test_get_many_honors_overridden_iter_on_sequence_subclass(base: type) -> None:
+    class IterOverride(base):  # type: ignore[misc, valid-type]
+        def __iter__(self) -> Iterator[str]:
+            return iter(("81.2.69.142",))
+
+    db_path = Path(__file__).parent / "data" / "test-data" / "GeoIP2-City-Test.mmdb"
+
+    with maxminddb_rust.open_database(db_path) as reader:
+        expected = reader.get("81.2.69.142")
+        assert expected is not None
+        ips = IterOverride(["1.1.1.1"])
+        assert reader.get_many(ips) == [expected]
+        assert reader.get_many_path(ips, ("country",)) == [expected["country"]]
