@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.15"]
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
@@ -51,8 +51,12 @@ jobs:
         run: pytest -v tests/
 
   test-free-threaded:
-    name: Test free-threaded Python 3.14
+    name: Test free-threaded Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.14t", "3.15t"]
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,10 +64,10 @@ jobs:
           persist-credentials: false
           submodules: recursive
 
-      - name: Set up free-threaded Python 3.14
+      - name: Set up free-threaded Python ${{ matrix.python-version }}
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14t"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master

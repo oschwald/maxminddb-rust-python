@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added Python 3.15 support, with wheels for the standard and free-threaded
+  builds. CI now tests 3.15 and free-threaded 3.15.
+
 ### Changed
 
 - Updated PyO3 from 0.29 to 0.30. Calls to `open_database` are faster on
