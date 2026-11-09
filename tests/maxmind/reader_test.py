@@ -919,7 +919,7 @@ class TestReaderInitialization(unittest.TestCase):
         ).read_bytes()
         cases = (
             (b"record_size\xa1\x18", b"record_size\xa1\x1e"),
-            (b"node_count\xc1\xa3", b"node_count\x04\x01\xff\xff\xff\xff"),
+            (b"node_count\xc1\x8b", b"node_count\x04\x01\xff\xff\xff\xff"),
         )
         for original, replacement in cases:
             with self.subTest(field=original):

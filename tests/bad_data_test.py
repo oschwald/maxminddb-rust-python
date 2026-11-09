@@ -29,6 +29,15 @@ BAD_DATA_PATHS = sorted(
     set((DATA_DIR / "bad-data").rglob("*.mmdb"))
     - {*EMPTY_METADATA_PATHS, UNREACHABLE_CORRUPTION}
 )
+# The metadata must not repeat a key. The Rust crate rejects a repeated
+# top-level key, but it keeps one value of a repeated language key in the
+# description map. Strict, so the test fails once the crate rejects it.
+REPEATED_DESCRIPTION_KEY = (
+    DATA_DIR
+    / "bad-data"
+    / "libmaxminddb"
+    / "libmaxminddb-repeated-description-key.mmdb"
+)
 IP = "1.2.3.4"
 
 
@@ -56,7 +65,18 @@ def open_reader(path: Path, mode: int) -> Iterator[maxminddb.Reader]:
         yield reader
 
 
-@pytest.mark.parametrize("path", BAD_DATA_PATHS, ids=lambda path: path.name)
+def bad_data_param(path: Path) -> object:
+    if path == REPEATED_DESCRIPTION_KEY:
+        xfail = pytest.mark.xfail(
+            strict=True,
+            raises=pytest.fail.Exception,
+            reason="The Rust crate accepts a repeated description key.",
+        )
+        return pytest.param(path, id=path.name, marks=xfail)
+    return pytest.param(path, id=path.name)
+
+
+@pytest.mark.parametrize("path", [bad_data_param(path) for path in BAD_DATA_PATHS])
 def test_bad_data_corpus_raises_invalid_database_error(path: Path, mode: int) -> None:
     with pytest.raises(maxminddb.InvalidDatabaseError):
         read_bad_database(path, mode)
