@@ -103,7 +103,7 @@ then contend on it.
 - **Machine**: Intel Core Ultra 7 265K, Ubuntu 26.10, Linux 7.3, `powersave`
   CPU frequency governor.
 - **Python**: CPython 3.14.8, and free-threaded CPython 3.14.3 for the thread
-  results. All packages are the wheels from PyPI.
+  results.
 
 ## Run the benchmarks
 

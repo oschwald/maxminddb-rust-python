@@ -34,6 +34,16 @@
   `Makefile.envs` for `CIBW_PYODIDE_VERSION`
 - Add `CHANGELOG.md` entries under `## [Unreleased]` in the PR that makes the
   change
+- Before a release, refresh the reader comparison on an idle machine. Install
+  the latest `maxminddb` and `maxminddb-zig` next to a release build of this
+  tree (`maturin develop --release`). Run `benchmarks/compare_readers.py` with
+  `--json-output` on GeoLite2 City and Country (`--rounds 5`). Then run it on
+  City with free-threaded 3.14t at `--threads` 1, 2, 4 and 8
+  (`--lib rust --lib official-c --case get --case get_path --rounds 3`).
+  maxminddb-zig crashes on free-threaded Python. Update the README Performance
+  table and `BENCHMARKS.md` (Summary ratios, result tables, Method), and check
+  that each claim still holds. In the Readers table, set each version to the one
+  measured. For maxminddb-rust, that is the version being released
 - Release: date the top heading `## [x.y.z] - YYYY-MM-DD` (today) and commit
   it, then run `dev-bin/release.sh`. It needs a clean tree (no changes and no
   untracked files), bumps `Cargo.toml`/`pyproject.toml`, pushes `main`, and the
