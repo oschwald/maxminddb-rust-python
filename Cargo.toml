@@ -3,7 +3,7 @@ name = "maxminddb-rust"
 version = "0.9.0"
 edition = "2021"
 authors = ["Gregory Oschwald <oschwald@gmail.com>"]
-description = "Rust-based Python binding for MaxMind DB - high-performance alternative to maxminddb"
+description = "Fast reader for MaxMind DB files, API-compatible with maxminddb and written in Rust"
 license = "ISC"
 repository = "https://github.com/oschwald/maxminddb-rust-python"
 

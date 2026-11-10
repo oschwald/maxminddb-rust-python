@@ -50,3 +50,17 @@ def resolve_database(path: str | None) -> Path:
         "Install a database there or pass --file /path/to/database.mmdb."
     )
     raise FileNotFoundError(msg)
+
+
+def chunks(values: list[str], workers: int) -> list[list[str]]:
+    """Divide addresses into balanced, private lists for each worker."""
+    base = len(values) // workers
+    remainder = len(values) % workers
+    result = []
+    start = 0
+    for i in range(workers):
+        size = base + (1 if i < remainder else 0)
+        end = start + size
+        result.append(values[start:end])
+        start = end
+    return result
