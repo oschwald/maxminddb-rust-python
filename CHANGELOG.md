@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- The package metadata now declares the license as the PEP 639 expression
+  `ISC`. Building from the source distribution now needs maturin 1.9.2 or
+  later.
+- The package metadata now has the `Typing :: Typed` and
+  `Programming Language :: Python :: Free Threading :: 3 - Stable`
+  classifiers.
+- The PyPI page now shows performance results and links to
+  [BENCHMARKS.md](https://github.com/oschwald/maxminddb-rust-python/blob/main/BENCHMARKS.md),
+  which compares maxminddb-rust with other Python readers.
+
 ## [0.9.0] - 2026-11-08
 
 ### Added
@@ -288,6 +302,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python 3.8+
 - CPython implementation
 
+[Unreleased]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.9.0...HEAD
 [0.9.0]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/oschwald/maxminddb-rust-python/compare/v0.6.0...v0.7.0
