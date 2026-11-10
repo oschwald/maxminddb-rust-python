@@ -10,23 +10,9 @@ import socket
 import struct
 import time
 
-from _common import default_databases, resolve_database
+from _common import chunks, default_databases, resolve_database
 
 import maxminddb_rust
-
-
-def chunks(values: list[str], workers: int) -> list[list[str]]:
-    """Divide addresses into balanced, private lists for each worker."""
-    base = len(values) // workers
-    remainder = len(values) % workers
-    result = []
-    start = 0
-    for i in range(workers):
-        size = base + (1 if i < remainder else 0)
-        end = start + size
-        result.append(values[start:end])
-        start = end
-    return result
 
 
 def main() -> None:

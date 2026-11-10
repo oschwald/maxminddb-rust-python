@@ -28,7 +28,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from _common import resolve_database
+from _common import chunks, resolve_database
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -106,20 +106,15 @@ def run_worker(argv: list[str]) -> None:
             "support, or PYTHON_GIL=1, turns it on."
         )
         raise RuntimeError(msg)
-    per_thread = len(ips) // int(threads)
-    chunks = [ips[i * per_thread : (i + 1) * per_thread] for i in range(int(threads))]
-    work = [
-        task
-        for task in (make_work(lib, case, reader, chunk) for chunk in chunks)
-        if task is not None
-    ]
+    tasks = (make_work(lib, case, reader, chunk) for chunk in chunks(ips, int(threads)))
+    work = [task for task in tasks if task is not None]
     if not work:
         print("null")
         return
     for task in work:
         task()  # Warm up.
     best = min(timed_pass(work) for _ in range(PASSES))
-    print(json.dumps(per_thread * len(work) / best))
+    print(json.dumps(len(ips) / best))
 
 
 def open_reader(lib: str, database: str) -> Any:  # noqa: ANN401 - Each library has its own Reader type.
