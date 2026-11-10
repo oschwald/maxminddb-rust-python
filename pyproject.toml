@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "maxminddb-rust"
-version = "0.9.0"
+version = "0.9.1"
 description = "Fast reader for MaxMind DB files, API-compatible with maxminddb and written in Rust"
 readme = "README.md"
 authors = [
