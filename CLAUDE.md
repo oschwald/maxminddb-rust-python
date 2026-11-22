@@ -8,9 +8,9 @@
 - `cargo clippy --all-targets -- -D warnings`, `ruff check .`,
   `ruff format --check .`, `prettier --check "**/*.md" "**/*.yml"` - what CI
   lints
-- Oldest supported Python is 3.9: run the suite there too. Create and activate
-  a venv outside the repo (`uv venv -p 3.9 /tmp/venv-3.9`, then
-  `. /tmp/venv-3.9/bin/activate`), then run the build and test command above.
+- Oldest supported Python is 3.10: run the suite there too. Create and activate
+  a venv outside the repo (`uv venv -p 3.10 /tmp/venv-3.10`, then
+  `. /tmp/venv-3.10/bin/activate`), then run the build and test command above.
   An untracked venv in the repo blocks `dev-bin/release.sh`
 - `benchmarks/compare_refs.py` - A/B two git refs. Run-to-run layout noise is
   about ±2%
@@ -28,7 +28,7 @@
 
 ## CI and release
 
-- `release.yml` lists Windows ARM64 Python versions separately (no 3.9/3.10).
+- `release.yml` lists Windows ARM64 Python versions separately (no 3.10).
   Update both lists when adding a version
 - Pyodide build: `RUSTUP_TOOLCHAIN` must match `RUST_TOOLCHAIN` in Pyodide's
   `Makefile.envs` for `CIBW_PYODIDE_VERSION`

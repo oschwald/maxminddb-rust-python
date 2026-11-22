@@ -60,7 +60,7 @@ def basic_batch_lookup() -> None:
         print(f"   Looking up {len(ips)} IP addresses...")
         results = reader.get_many(ips)
 
-        for ip, result in zip(ips, results):
+        for ip, result in zip(ips, results, strict=True):
             if result:
                 country = result.get("country", {}).get("names", {}).get("en", "N/A")
                 city = result.get("city", {}).get("names", {}).get("en", "N/A")
@@ -120,7 +120,7 @@ def process_log_file_simulation() -> None:
         results = reader.get_many(ips)
 
         # Process results
-        for log_entry, _ip, geo_data in zip(log_entries, ips, results):
+        for log_entry, _ip, geo_data in zip(log_entries, ips, results, strict=True):
             if geo_data:
                 country = geo_data.get("country", {}).get("iso_code", "??")
                 city = geo_data.get("city", {}).get("names", {}).get("en", "Unknown")
