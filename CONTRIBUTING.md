@@ -7,7 +7,7 @@ Thank you for your interest in contributing! This document provides guidelines f
 ### Prerequisites
 
 - Rust toolchain (latest stable)
-- Python 3.9 or later
+- Python 3.10 or later
 - [uv](https://docs.astral.sh/uv/) for Python dependency management
 - [maturin](https://www.maturin.rs/) for building the extension module
 
