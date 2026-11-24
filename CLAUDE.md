@@ -29,7 +29,15 @@
 ## CI and release
 
 - `release.yml` lists Windows ARM64 Python versions separately (no 3.10).
-  Update both lists when adding a version
+  Update both lists when adding a version. `test_wheels` installs each wheel
+  artifact on a runner of its own architecture and runs
+  `dev-bin/smoke_test.py`: when adding a build target or raising the oldest
+  or newest Python, update its `platform` entries and `python` list too.
+  `test_musllinux_wheels` does the same for the musllinux wheels in Alpine
+  containers
+- `upload_pypi` waits for the wheel tests, `test_sdist` and `check_versions`.
+  `dev-bin/check_release_version.py` fails the release when the tag,
+  `pyproject.toml`, `Cargo.toml` or an artifact name disagree on the version
 - Pyodide build: `RUSTUP_TOOLCHAIN` must match `RUST_TOOLCHAIN` in Pyodide's
   `Makefile.envs` for `CIBW_PYODIDE_VERSION`
 - Add `CHANGELOG.md` entries under `## [Unreleased]` in the PR that makes the

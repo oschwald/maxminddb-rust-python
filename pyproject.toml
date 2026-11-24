@@ -74,6 +74,8 @@ ignore = [
 "examples/*" = ["T201"]
 # This helper is imported by directly executed scripts, not a package.
 "benchmarks/_common.py" = ["INP001"]
+# Release helpers run as scripts and report what they checked.
+"dev-bin/*" = ["INP001", "T201"]
 
 [tool.uv]
 cache-keys = [{file = "pyproject.toml"}, {file = "Cargo.toml"}, {file = "**/*.rs"}]
