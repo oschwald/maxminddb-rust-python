@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Wheels no longer install `py.typed` and `maxminddb_rust.pyi` directly into
+  `site-packages`. The type stub and `py.typed` marker are still installed in
+  the `maxminddb_rust` package. A top-level `py.typed` could be removed when
+  another package that installs the same file was uninstalled.
+
 ### Removed
 
 - Dropped support for Python 3.9, which reached end of life in October 2025.
