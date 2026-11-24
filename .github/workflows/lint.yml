@@ -3,7 +3,15 @@ name: Lint
 
 on:
   push:
+    branches:
+      - main
   pull_request:
+
+# Cancel superseded runs for the same pull request. Other events get a
+# unique group so they never cancel each other.
+concurrency:
+  group: lint-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
