@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import errno
 import io
+import mmap
 import os
 import shutil
 import sys
@@ -37,16 +38,95 @@ def test_mode_fd_opens_bytes_io() -> None:
         reader.close()
 
 
+@pytest.mark.parametrize("wrap", ["mmap", "memoryview"])
+def test_mode_fd_accepts_buffer_contents(wrap: str) -> None:
+    db_path = Path(__file__).parent / "data" / "test-data" / "GeoIP2-City-Test.mmdb"
+
+    with db_path.open("rb") as database:
+        if wrap == "mmap":
+            contents: mmap.mmap | memoryview = mmap.mmap(
+                database.fileno(), 0, access=mmap.ACCESS_READ
+            )
+        else:
+            contents = memoryview(database.read())
+
+        class BufferFile:
+            def read(self) -> mmap.mmap | memoryview:
+                return contents
+
+        reader = maxminddb_rust.open_database(BufferFile(), maxminddb_rust.MODE_FD)  # type: ignore[arg-type]
+        try:
+            assert reader.get("81.2.69.142") is not None
+        finally:
+            reader.close()
+            if isinstance(contents, mmap.mmap):
+                contents.close()
+
+
 def test_mode_fd_requires_readable_object() -> None:
-    with pytest.raises(AttributeError, match="'int' object has no attribute 'read'"):
+    with pytest.raises(TypeError, match=r"Unsupported database type \(int\)"):
         maxminddb_rust.open_database(0, maxminddb_rust.MODE_FD)
 
 
 def test_mode_file_requires_pathlike_database() -> None:
-    with pytest.raises(
-        ValueError, match="database must be a string, PathLike, or file descriptor"
-    ):
+    with pytest.raises(TypeError, match=r"Unsupported database type \(int\)"):
         maxminddb_rust.open_database(0, maxminddb_rust.MODE_FILE)
+
+
+@pytest.mark.parametrize("mode", [maxminddb_rust.MODE_AUTO, maxminddb_rust.MODE_FILE])
+def test_bytes_path_opens_database(mode: int) -> None:
+    db_path = Path(__file__).parent / "data" / "test-data" / "GeoIP2-City-Test.mmdb"
+
+    with maxminddb_rust.open_database(os.fsencode(db_path), mode) as reader:
+        assert reader.get("81.2.69.142") is not None
+
+
+def test_auto_mode_reads_binary_file_object() -> None:
+    db_path = Path(__file__).parent / "data" / "test-data" / "GeoIP2-City-Test.mmdb"
+
+    with db_path.open("rb") as db_file, maxminddb_rust.open_database(db_file) as reader:
+        assert reader.get("81.2.69.142") is not None
+
+
+def test_mode_equal_to_a_mode_is_accepted() -> None:
+    db_path = Path(__file__).parent / "data" / "test-data" / "GeoIP2-City-Test.mmdb"
+
+    with maxminddb_rust.open_database(db_path, 2.0) as reader:  # type: ignore[arg-type]
+        assert reader.get("81.2.69.142") is not None
+
+
+def test_mode_errors_propagate() -> None:
+    class BadMode:
+        def __index__(self) -> int:
+            raise KeyboardInterrupt
+
+    db_path = Path(__file__).parent / "data" / "test-data" / "GeoIP2-City-Test.mmdb"
+
+    with pytest.raises(KeyboardInterrupt):
+        maxminddb_rust.open_database(db_path, BadMode())  # type: ignore[arg-type]
+
+
+def test_read_errors_propagate() -> None:
+    class BadContents:
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, index: int) -> int:
+            raise KeyboardInterrupt
+
+    class BadFile:
+        def read(self) -> BadContents:
+            return BadContents()
+
+    with pytest.raises(KeyboardInterrupt):
+        maxminddb_rust.open_database(BadFile(), maxminddb_rust.MODE_FD)  # type: ignore[arg-type]
+
+
+def test_non_integer_mode_raises_value_error() -> None:
+    db_path = Path(__file__).parent / "data" / "test-data" / "GeoIP2-City-Test.mmdb"
+
+    with pytest.raises(ValueError, match=r"Unsupported open mode \(None\)"):
+        maxminddb_rust.open_database(db_path, None)  # type: ignore[arg-type]
 
 
 def test_mode_file_opens_pathlike_database() -> None:

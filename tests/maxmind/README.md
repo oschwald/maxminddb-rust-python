@@ -6,12 +6,22 @@ official
 repository to verify API compatibility.
 
 The latest sync was checked against upstream commit
-[`00cb0f1`](https://github.com/maxmind/MaxMind-DB-Reader-python/commit/00cb0f15b3047ec4eeeea80b8375740ef84e7e84)
-(3.2.0) on September 12, 2026. It adds the reader's payload amplification,
-pointer fan-out, resource-limit boundary, truncated search-tree, and invalid
-tree-metadata tests. Resource errors use this binding's `InvalidDatabaseError`
-messages, and the tests retain Python 3.10-compatible syntax and all supported
-open modes.
+[`a65b3b7`](https://github.com/maxmind/MaxMind-DB-Reader-python/commit/a65b3b7d92064cebe6bb8608cb6cd2fe0cf86315)
+(3.3.0) on November 24, 2026. It adds 3.3.0's tests for `bytes` paths, file
+objects in `MODE_AUTO`, the `Mode` enum, `TypeError` for an unsupported
+database argument, iterators that stop after an error, corrupt search trees
+and metadata, and map keys that are not strings. Resource and corrupt-data
+errors use this binding's `InvalidDatabaseError` messages, and the tests retain
+Python 3.10-compatible syntax and all supported open modes.
+
+Tests for deliberate differences are skipped with a "Known difference" or "Not
+applicable" reason, and `MIGRATION.md` lists each difference under "Known
+Differences". The test for a search tree whose record points back to the root
+is marked as an expected failure: the Rust `maxminddb` crate returns some
+networks before it detects the loop. Upstream's `TestExtensionObjects` tests
+and the tests of its pure Python reader's private helpers exercise
+implementation details that this extension does not have, so they are not
+copied.
 
 The upstream resource-limit probe for older system `libmaxminddb` versions is
 unnecessary here: this extension uses the Rust crate pinned in `Cargo.lock`.

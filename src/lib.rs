@@ -3,10 +3,13 @@ use arc_swap::ArcSwapOption;
 use maxminddb_crate::{MaxMindDbError, PathElement, Reader as MaxMindReader};
 use memmap2::Mmap;
 use pyo3::{
-    exceptions::{PyAttributeError, PyOSError, PyRuntimeError, PyTypeError, PyValueError},
+    exceptions::{
+        PyAttributeError, PyOSError, PyOverflowError, PyRuntimeError, PyTypeError, PyValueError,
+    },
     prelude::*,
     types::{
-        PyByteArray, PyBytes, PyList, PyListMethods, PyModule, PyString, PyTuple, PyTupleMethods,
+        PyByteArray, PyBytes, PyDict, PyList, PyListMethods, PyModule, PyString, PyTuple,
+        PyTupleMethods,
     },
 };
 use std::{cell::RefCell, ffi::OsString, net::IpAddr, path::PathBuf, sync::Arc};
@@ -26,7 +29,10 @@ use decode::PyDecodedValue;
 use ip::{ipv6_in_ipv4_error, parse_ip_address};
 use iterator::ReaderIterator;
 use metadata::Metadata;
-use open::{open_database_fd, open_database_memory, open_database_mmap};
+use open::{
+    has_callable_read, open_database_fd, open_database_memory, open_database_mmap,
+    unsupported_database_type,
+};
 use path::{parse_path, path_elements_from_owned_path, path_tuple_matches_owned, OwnedPathElement};
 
 // Define InvalidDatabaseError exception (subclass of RuntimeError)
@@ -49,11 +55,11 @@ const MODE_FD: i32 = 16;
 const ERR_CLOSED_DB: &str = "Attempt to read from a closed MaxMind DB.";
 const ERR_BAD_DATA: &str =
     "The MaxMind DB file's data section contains bad data (unknown data type or corrupt data)";
-const ERR_BAD_DATABASE_ARG: &str = "database must be a string, PathLike, or file descriptor";
 const ERR_IPS_ITERABLE: &str = "ips must be an iterable of strings or ipaddress objects";
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum OpenMode {
+    Auto,
     MmapExt,
     Mmap,
     File,
@@ -66,7 +72,7 @@ impl TryFrom<i32> for OpenMode {
 
     fn try_from(mode: i32) -> Result<Self, Self::Error> {
         match mode {
-            MODE_AUTO => Ok(Self::Mmap),
+            MODE_AUTO => Ok(Self::Auto),
             MODE_MMAP_EXT => Ok(Self::MmapExt),
             MODE_MMAP => Ok(Self::Mmap),
             MODE_FILE => Ok(Self::File),
@@ -75,6 +81,56 @@ impl TryFrom<i32> for OpenMode {
             _ => Err(PyValueError::new_err(format!(
                 "Unsupported open mode ({mode})"
             ))),
+        }
+    }
+}
+
+/// The `mode` argument of `Reader()` and `open_database()`.
+///
+/// The official package checks the mode with `in`, so a value that equals a
+/// mode, such as 2.0, is accepted, and any other value, such as None, raises
+/// ValueError. Extraction fails only when Python raises an unexpected error.
+struct ModeArg(Result<i32, String>);
+
+impl ModeArg {
+    const AUTO: Self = Self(Ok(MODE_AUTO));
+
+    fn resolve(self) -> PyResult<OpenMode> {
+        match self.0 {
+            Ok(mode) => OpenMode::try_from(mode),
+            Err(repr) => Err(PyValueError::new_err(format!(
+                "Unsupported open mode ({repr})"
+            ))),
+        }
+    }
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for ModeArg {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        let py = obj.py();
+        match obj.extract::<i32>() {
+            Ok(mode) => Ok(Self(Ok(mode))),
+            Err(err)
+                if err.is_instance_of::<PyTypeError>(py)
+                    || err.is_instance_of::<PyOverflowError>(py) =>
+            {
+                for mode in [
+                    MODE_AUTO,
+                    MODE_MMAP_EXT,
+                    MODE_MMAP,
+                    MODE_FILE,
+                    MODE_MEMORY,
+                    MODE_FD,
+                ] {
+                    if obj.eq(mode)? {
+                        return Ok(Self(Ok(mode)));
+                    }
+                }
+                Ok(Self(Err(obj.repr()?.to_string())))
+            }
+            Err(err) => Err(err),
         }
     }
 }
@@ -218,7 +274,9 @@ fn convert_prefix_len(queried_ip: IpAddr, network: ipnetwork::IpNetwork) -> usiz
 }
 
 /// A Python wrapper around the MaxMind DB reader.
-/// Supports memory-mapped files (MODE_MMAP) and read-file modes (MODE_FILE/MODE_MEMORY/MODE_FD).
+/// Supports memory-mapped files (MODE_AUTO/MODE_MMAP/MODE_MMAP_EXT) and read-file
+/// modes (MODE_FILE/MODE_MEMORY/MODE_FD). MODE_AUTO memory-maps a path and reads
+/// a binary file object into memory.
 #[pyclass(module = "maxminddb_rust")]
 struct Reader {
     reader: ArcSwapOption<ReaderSource>,
@@ -228,10 +286,9 @@ struct Reader {
 #[pymethods]
 impl Reader {
     #[new]
-    #[pyo3(signature = (database, mode=MODE_AUTO))]
-    fn new(database: &Bound<'_, PyAny>, mode: i32) -> PyResult<Self> {
-        let open_mode = Self::resolve_open_mode(mode)?;
-        Self::open_reader_from_mode(database, open_mode)
+    #[pyo3(signature = (database, mode=ModeArg::AUTO))]
+    fn new(database: &Bound<'_, PyAny>, mode: ModeArg) -> PyResult<Self> {
+        Self::open_reader_from_mode(database, mode.resolve()?)
     }
 
     /// Check if the database has been closed.
@@ -617,41 +674,62 @@ impl Reader {
         }
     }
 
-    fn extract_database_path(database: &Bound<'_, PyAny>) -> PyResult<PathBuf> {
-        let path = if database.is_instance_of::<PyString>() {
+    /// Return the path of a str, bytes or os.PathLike database argument, or
+    /// None for any other type. Errors from `__fspath__` propagate.
+    fn database_path(database: &Bound<'_, PyAny>) -> PyResult<Option<PathBuf>> {
+        let path = if database.is_instance_of::<PyString>() || database.is_instance_of::<PyBytes>()
+        {
             database.clone()
         } else {
-            match database.call_method0("__fspath__") {
-                Ok(path) => path,
+            match database.getattr(pyo3::intern!(database.py(), "__fspath__")) {
+                Ok(fspath) => fspath.call0()?,
                 Err(err) if err.is_instance_of::<PyAttributeError>(database.py()) => {
-                    return Err(PyValueError::new_err(ERR_BAD_DATABASE_ARG));
+                    return Ok(None);
                 }
                 Err(err) => return Err(err),
             }
         };
 
-        if let Ok(path) = path.extract::<String>() {
-            return Ok(path.into());
+        if let Ok(path) = path.cast::<PyString>() {
+            if let Ok(path) = path.to_str() {
+                return Ok(Some(path.into()));
+            }
+            return path.extract::<OsString>().map(|path| Some(path.into()));
         }
-        path.extract::<OsString>().map(PathBuf::from)
-    }
-
-    fn resolve_open_mode(mode: i32) -> PyResult<OpenMode> {
-        OpenMode::try_from(mode)
+        if path.is_instance_of::<PyBytes>() {
+            // os.fsdecode() gives the str that open() would use for the bytes.
+            let decoded = database
+                .py()
+                .import(pyo3::intern!(database.py(), "os"))?
+                .call_method1(pyo3::intern!(database.py(), "fsdecode"), (path,))?;
+            return decoded.extract::<OsString>().map(|path| Some(path.into()));
+        }
+        Err(PyTypeError::new_err(format!(
+            "expected {}.__fspath__() to return str or bytes, not {}",
+            database.get_type().name()?,
+            path.get_type().name()?
+        )))
     }
 
     fn open_reader_from_mode(database: &Bound<'_, PyAny>, mode: OpenMode) -> PyResult<Self> {
-        match mode {
-            OpenMode::Mmap | OpenMode::MmapExt => {
-                let path = Self::extract_database_path(database)?;
-                open_database_mmap(&path)
+        // A path wins over read(), because some path objects also have a text
+        // read(). MODE_FD reads any object with read().
+        if mode != OpenMode::Fd {
+            if let Some(path) = Self::database_path(database)? {
+                return match mode {
+                    OpenMode::Auto | OpenMode::Mmap | OpenMode::MmapExt => {
+                        open_database_mmap(&path)
+                    }
+                    OpenMode::File | OpenMode::Memory => open_database_memory(&path),
+                    OpenMode::Fd => unreachable!("MODE_FD does not take a path"),
+                };
             }
-            OpenMode::File | OpenMode::Memory => {
-                let path = Self::extract_database_path(database)?;
-                open_database_memory(&path)
-            }
-            OpenMode::Fd => open_database_fd(database),
         }
+        // MODE_AUTO reads a file object into memory, as MODE_FD does.
+        if matches!(mode, OpenMode::Auto | OpenMode::Fd) && has_callable_read(database)? {
+            return open_database_fd(database);
+        }
+        Err(unsupported_database_type(database, mode))
     }
 
     #[inline]
@@ -798,11 +876,12 @@ fn is_bytes_like_or_string(obj: &Bound<'_, PyAny>) -> bool {
 /// Open a MaxMind DB database file.
 ///
 /// Args:
-///     database: Path to the MaxMind DB file, or a readable binary object for MODE_FD.
-///         Raw integer OS file descriptors are not accepted.
+///     database: Path to the MaxMind DB file (str, bytes or os.PathLike), or a
+///         readable binary file object for MODE_AUTO or MODE_FD. Raw integer OS
+///         file descriptors are not accepted.
 ///     mode: The mode to use when opening the database. Defaults to MODE_AUTO.
 ///         Available modes:
-///         - MODE_AUTO (0): Currently resolves to MODE_MMAP
+///         - MODE_AUTO (0): Memory-map a path, or read a file object into memory
 ///         - MODE_MMAP (2): Use memory-mapped file I/O (default, best performance)
 ///         - MODE_MMAP_EXT (1): Compatibility alias for the same Rust mmap
 ///           reader as MODE_MMAP
@@ -819,6 +898,7 @@ fn is_bytes_like_or_string(obj: &Bound<'_, PyAny>) -> bool {
 ///         OS errors set ``errno`` and ``filename``, so the subclass
 ///         matches the cause, as with ``open()``.
 ///     InvalidDatabaseError: If the file is not a valid MaxMind DB file.
+///     TypeError: If the database argument is not supported by the mode.
 ///     ValueError: If an unsupported mode is specified.
 ///
 /// Example:
@@ -836,8 +916,8 @@ fn is_bytes_like_or_string(obj: &Bound<'_, PyAny>) -> bool {
 ///     >>> reader = maxminddb_rust.open_database('/path/to/GeoIP2-City.mmdb',
 ///     ...                                   mode=maxminddb_rust.MODE_MEMORY)
 #[pyfunction]
-#[pyo3(signature = (database, mode=MODE_AUTO))]
-fn open_database(database: &Bound<'_, PyAny>, mode: i32) -> PyResult<Reader> {
+#[pyo3(signature = (database, mode=ModeArg::AUTO))]
+fn open_database(database: &Bound<'_, PyAny>, mode: ModeArg) -> PyResult<Reader> {
     Reader::new(database, mode)
 }
 
@@ -857,13 +937,34 @@ fn maxminddb_rust(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Add function
     m.add_function(wrap_pyfunction!(open_database, m)?)?;
 
-    // Add MODE constants
-    m.add("MODE_AUTO", MODE_AUTO)?;
-    m.add("MODE_MMAP_EXT", MODE_MMAP_EXT)?;
-    m.add("MODE_MMAP", MODE_MMAP)?;
-    m.add("MODE_FILE", MODE_FILE)?;
-    m.add("MODE_MEMORY", MODE_MEMORY)?;
-    m.add("MODE_FD", MODE_FD)?;
+    // Add the Mode enum and the MODE constants, which are its members as in
+    // the official package.
+    let modes = [
+        ("AUTO", MODE_AUTO),
+        ("MMAP_EXT", MODE_MMAP_EXT),
+        ("MMAP", MODE_MMAP),
+        ("FILE", MODE_FILE),
+        ("MEMORY", MODE_MEMORY),
+        ("FD", MODE_FD),
+    ];
+    let kwargs = PyDict::new(_py);
+    kwargs.set_item("module", "maxminddb_rust")?;
+    let mode_enum = _py
+        .import("enum")?
+        .getattr("IntEnum")?
+        .call(("Mode", modes.to_vec()), Some(&kwargs))?;
+    mode_enum.setattr(
+        "__doc__",
+        "Database open modes.\n\nThese modes control how the MaxMind DB file is opened and read.",
+    )?;
+    m.add("Mode", &mode_enum)?;
+    for (name, _) in modes {
+        m.add(format!("MODE_{name}"), mode_enum.getattr(name)?)?;
+    }
+
+    // The package maturin builds star-imports this module, so __version__ must
+    // be in __all__ to be visible, unlike in the official package.
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 
     Ok(())
 }

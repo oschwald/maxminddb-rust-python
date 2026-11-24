@@ -1,35 +1,60 @@
 """Type stubs for maxminddb_rust.
 
 This module provides a high-performance alternative to the maxminddb Python package,
-implemented in Rust using PyO3 with 100% API compatibility.
+implemented in Rust using PyO3. It follows the maxminddb package's Reader API;
+see the "Known differences" section of MIGRATION.md for where it differs.
 """
 
 from collections.abc import Iterable, Iterator, Sequence
+from enum import IntEnum
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 from os import PathLike
 from types import TracebackType
-from typing import Any, BinaryIO, Literal, final
+from typing import Any, Literal, Protocol, TypeAlias, final
+
+class _SupportsRead(Protocol):
+    def read(self, /) -> bytes: ...
+
+_Database: TypeAlias = str | bytes | PathLike[str] | PathLike[bytes] | _SupportsRead
 
 __all__ = [  # noqa: RUF022 - Match the extension export order.
     "Reader",
     "Metadata",
     "InvalidDatabaseError",
     "open_database",
+    "Mode",
     "MODE_AUTO",
     "MODE_MMAP_EXT",
     "MODE_MMAP",
     "MODE_FILE",
     "MODE_MEMORY",
     "MODE_FD",
+    "__version__",
 ]
 
+__version__: str
+"""The version of the maxminddb_rust package."""
+
+class Mode(IntEnum):
+    """Database open modes.
+
+    These modes control how the MaxMind DB file is opened and read.
+    """
+
+    AUTO = 0
+    MMAP_EXT = 1
+    MMAP = 2
+    FILE = 4
+    MEMORY = 8
+    FD = 16
+
 # Mode constants
-MODE_AUTO: Literal[0]
-MODE_MMAP_EXT: Literal[1]
-MODE_MMAP: Literal[2]
-MODE_FILE: Literal[4]
-MODE_MEMORY: Literal[8]
-MODE_FD: Literal[16]
+MODE_AUTO: Literal[Mode.AUTO]
+MODE_MMAP_EXT: Literal[Mode.MMAP_EXT]
+MODE_MMAP: Literal[Mode.MMAP]
+MODE_FILE: Literal[Mode.FILE]
+MODE_MEMORY: Literal[Mode.MEMORY]
+MODE_FD: Literal[Mode.FD]
 
 class InvalidDatabaseError(RuntimeError):
     """Exception raised when the MaxMind DB file is invalid or corrupt."""
@@ -83,19 +108,18 @@ class Reader:
 
     Provides methods to query IP address information from MaxMind DB files.
     Supports memory-mapped files (MODE_AUTO/MODE_MMAP/MODE_MMAP_EXT) and
-    read-file modes (MODE_FILE/MODE_MEMORY/MODE_FD). MODE_AUTO currently
-    resolves to MODE_MMAP, and MODE_MMAP_EXT uses the same Rust memory-mapped
-    reader as MODE_MMAP.
+    read-file modes (MODE_FILE/MODE_MEMORY/MODE_FD). MODE_AUTO memory-maps a
+    path and reads a binary file object into memory, and MODE_MMAP_EXT uses
+    the same Rust memory-mapped reader as MODE_MMAP.
     """
 
-    def __new__(
-        cls, database: str | PathLike[str] | BinaryIO, mode: int = ...
-    ) -> Reader:
+    def __new__(cls, database: _Database, mode: int = ...) -> Reader:
         """Open a Reader for a MaxMind DB file.
 
         Args:
-            database: Path to the MaxMind DB file, or a readable binary object
-                for MODE_FD. Raw integer OS file descriptors are not accepted.
+            database: Path to the MaxMind DB file (str, bytes or os.PathLike),
+                or a readable binary file object for MODE_AUTO or MODE_FD. Raw
+                integer OS file descriptors are not accepted.
             mode: The mode to use when opening the database. Defaults to MODE_AUTO.
 
         Raises:
@@ -104,6 +128,7 @@ class Reader:
                 OS errors set ``errno`` and ``filename``, so the subclass
                 matches the cause, as with ``open()``.
             InvalidDatabaseError: If the file is not a valid MaxMind DB file.
+            TypeError: If the database argument is not supported by the mode.
             ValueError: If an unsupported mode is specified.
 
         """
@@ -288,15 +313,16 @@ class Reader:
 
         """
 
-def open_database(database: str | PathLike[str] | BinaryIO, mode: int = ...) -> Reader:
+def open_database(database: _Database, mode: int = ...) -> Reader:
     """Open a MaxMind DB database file.
 
     Args:
-        database: Path to the MaxMind DB file, or a readable binary object for
-            MODE_FD. Raw integer OS file descriptors are not accepted.
+        database: Path to the MaxMind DB file (str, bytes or os.PathLike), or a
+            readable binary file object for MODE_AUTO or MODE_FD. Raw integer
+            OS file descriptors are not accepted.
         mode: The mode to use when opening the database. Defaults to MODE_AUTO.
             Available modes:
-            - MODE_AUTO (0): Currently resolves to MODE_MMAP
+            - MODE_AUTO (0): Memory-map a path, or read a file object into memory
             - MODE_MMAP (2): Use memory-mapped file I/O (default, best performance)
             - MODE_MMAP_EXT (1): Compatibility alias for the same Rust mmap
               reader as MODE_MMAP
@@ -313,6 +339,7 @@ def open_database(database: str | PathLike[str] | BinaryIO, mode: int = ...) -> 
             OS errors set ``errno`` and ``filename``, so the subclass
             matches the cause, as with ``open()``.
         InvalidDatabaseError: If the file is not a valid MaxMind DB file.
+        TypeError: If the database argument is not supported by the mode.
         ValueError: If an unsupported mode is specified.
 
     Example:

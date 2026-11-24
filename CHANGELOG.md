@@ -12,9 +12,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Releases now include musllinux wheels for x86_64 and aarch64, so pip no
   longer needs a Rust toolchain to install the package on Alpine and other
   musl-based Linux distributions.
+- `maxminddb_rust.Mode`, an `IntEnum` of the open modes, as in `maxminddb`
+  3.3.0. The `MODE_*` constants are now its members and still compare equal to
+  the same integers.
+- `maxminddb_rust.__version__`.
+- `open_database()` and `Reader()` now accept `bytes` paths and `os.PathLike`
+  objects that return `bytes`.
+- In `MODE_AUTO`, `open_database()` and `Reader()` now accept a binary file
+  object and read it into memory, as `MODE_FD` does.
 
 ### Changed
 
+- A database argument that the mode does not support now raises `TypeError`,
+  as in `maxminddb` 3.3.0. It previously raised `ValueError`, or
+  `AttributeError` in `MODE_FD`. Reading a text file object also raises
+  `TypeError`.
+- A mode that is not an integer now works as in `maxminddb` 3.3.0: a value
+  equal to a mode, such as `2.0`, is accepted, and any other value, such as
+  `None`, raises `ValueError` rather than `TypeError`.
+- An iterator over a reader now stops after it raises `InvalidDatabaseError`,
+  as in `maxminddb` 3.3.0.
+- The documentation no longer claims 100% API compatibility with `maxminddb`.
+  `MIGRATION.md` now lists the known differences, and its sed recipe imports
+  `maxminddb_rust as maxminddb` so that later `maxminddb.` uses keep working.
 - The type stub now marks `Reader` and `Metadata` as `@final`, since neither
   can be subclassed at runtime, and declares the `Reader` constructor as
   `__new__`. Type checkers now reject subclasses of these classes. CI checks

@@ -14,7 +14,10 @@ use self_cell::self_cell;
 use std::{
     cell::Cell,
     str::FromStr,
-    sync::{Arc, Mutex, TryLockError},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, TryLockError,
+    },
 };
 
 /// Iterator for Reader that yields `(network, record)` tuples.
@@ -25,6 +28,10 @@ use std::{
 pub(crate) struct ReaderIterator {
     iter: Mutex<ReaderWithin>,
     cache: IpaddressCache,
+    /// Set after a database error, so that the iterator stops, as a generator
+    /// does and as the official package's iterators do. It is read and set
+    /// only while `iter` is locked.
+    failed: AtomicBool,
 }
 
 impl ReaderIterator {
@@ -60,6 +67,7 @@ impl ReaderIterator {
         Ok(Self {
             iter: Mutex::new(iter),
             cache,
+            failed: AtomicBool::new(false),
         })
     }
 
@@ -88,10 +96,16 @@ impl ReaderIterator {
                     .map_err(|_| poisoned_error())?
             }
         };
+        if self.failed.load(Ordering::Relaxed) {
+            return Ok(None);
+        }
         let next_item = {
             let _held = HeldLock::new();
             iter.next()
         };
+        if matches!(next_item, Some(Err(_))) {
+            self.failed.store(true, Ordering::Relaxed);
+        }
         drop(iter);
         match next_item {
             Some(result) => result.map(Some).map_err(|err| iteration_error(py, err)),

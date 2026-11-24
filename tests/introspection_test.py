@@ -48,23 +48,40 @@ def _stub_class_member_names(tree: ast.Module, class_name: str) -> set[str]:
     raise AssertionError(msg)
 
 
-def _literal_value(annotation: ast.expr) -> int | None:
+def _stub_enum_members(tree: ast.Module, class_name: str) -> dict[str, int]:
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            return {
+                child.targets[0].id: child.value.value
+                for child in node.body
+                if isinstance(child, ast.Assign)
+                and isinstance(child.targets[0], ast.Name)
+                and isinstance(child.value, ast.Constant)
+                and isinstance(child.value.value, int)
+            }
+    msg = f"{class_name} not found in maxminddb_rust.pyi"
+    raise AssertionError(msg)
+
+
+def _literal_mode_member(annotation: ast.expr) -> str | None:
+    """Return X for a ``Literal[Mode.X]`` annotation."""
     if not isinstance(annotation, ast.Subscript):
         return None
     if not isinstance(annotation.value, ast.Name) or annotation.value.id != "Literal":
         return None
 
     value = annotation.slice
-    index_type = getattr(ast, "Index", None)
-    if index_type is not None and isinstance(value, index_type):
-        value = value.value
-    if isinstance(value, ast.Constant) and isinstance(value.value, int):
-        return value.value
+    if (
+        isinstance(value, ast.Attribute)
+        and isinstance(value.value, ast.Name)
+        and value.value.id == "Mode"
+    ):
+        return value.attr
     return None
 
 
-def _stub_mode_values(tree: ast.Module) -> dict[str, int]:
-    values = {}
+def _stub_mode_constants(tree: ast.Module) -> dict[str, str]:
+    constants = {}
     for node in tree.body:
         if not isinstance(node, ast.AnnAssign):
             continue
@@ -72,10 +89,10 @@ def _stub_mode_values(tree: ast.Module) -> dict[str, int]:
             "MODE_"
         ):
             continue
-        value = _literal_value(node.annotation)
-        if value is not None:
-            values[node.target.id] = value
-    return values
+        member = _literal_mode_member(node.annotation)
+        if member is not None:
+            constants[node.target.id] = member
+    return constants
 
 
 def test_public_types_report_public_module() -> None:
@@ -88,14 +105,28 @@ def test_runtime_exports_match_stub_exports() -> None:
     stub_exports = _stub_all(_stub_tree())
 
     assert maxminddb_rust.__all__ == stub_exports
-    assert {name for name in dir(maxminddb_rust) if not name.startswith("_")} >= set(
-        stub_exports
-    )
+    assert set(dir(maxminddb_rust)) >= set(stub_exports)
 
 
-def test_runtime_mode_values_match_stub_literals() -> None:
-    for name, expected in _stub_mode_values(_stub_tree()).items():
-        assert getattr(maxminddb_rust, name) == expected
+def test_runtime_mode_enum_matches_stub() -> None:
+    members = _stub_enum_members(_stub_tree(), "Mode")
+
+    assert members
+    assert {member.name: member.value for member in maxminddb_rust.Mode} == members
+    assert maxminddb_rust.Mode.__module__ == "maxminddb_rust"
+
+
+def test_runtime_mode_constants_match_stub_literals() -> None:
+    constants = _stub_mode_constants(_stub_tree())
+
+    assert len(constants) == len(_stub_enum_members(_stub_tree(), "Mode"))
+    for name, member in constants.items():
+        assert getattr(maxminddb_rust, name) is maxminddb_rust.Mode[member]
+
+
+def test_version_is_a_string() -> None:
+    assert isinstance(maxminddb_rust.__version__, str)
+    assert maxminddb_rust.__version__
 
 
 def test_runtime_reader_members_match_stub_members() -> None:
