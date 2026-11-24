@@ -570,7 +570,7 @@ impl Reader {
         match result {
             Ok(Some(data)) => Ok(data.into_py()),
             Ok(None) => Ok(py.None()),
-            Err(err) => Err(Self::lookup_error(err)),
+            Err(err) => Err(Self::lookup_error(py, err)),
         }
     }
 
@@ -583,17 +583,37 @@ impl Reader {
         match result {
             Ok((Some(data), prefix_len)) => Ok((data.into_py(), prefix_len)),
             Ok((None, prefix_len)) => Ok((py.None(), prefix_len)),
-            Err(err) => Err(Self::lookup_error(err)),
+            Err(err) => Err(Self::lookup_error(py, err)),
         }
     }
 
-    #[inline]
-    fn lookup_error(err: MaxMindDbError) -> PyErr {
+    /// Convert a failed lookup to a Python exception.
+    ///
+    /// Bad data raises `InvalidDatabaseError` with the message the official
+    /// reader uses. Its `__cause__` holds the decoder's own message, which in
+    /// turn has the Python error that stopped decoding, if one did, as its
+    /// cause. A `MemoryError` from decoding is raised as it is.
+    #[cold]
+    fn lookup_error(py: Python, err: MaxMindDbError) -> PyErr {
+        let py_cause = match decode::take_decode_failure(py) {
+            Ok(cause) => cause,
+            Err(py_err) => return py_err,
+        };
         match err {
             MaxMindDbError::InvalidDatabase { .. }
             | MaxMindDbError::Decoding { .. }
-            | MaxMindDbError::ResourceLimit { .. } => InvalidDatabaseError::new_err(ERR_BAD_DATA),
-            other => PyValueError::new_err(format!("Database error: {other}")),
+            | MaxMindDbError::ResourceLimit { .. } => {
+                let detail = InvalidDatabaseError::new_err(err.to_string());
+                detail.set_cause(py, py_cause);
+                let py_err = InvalidDatabaseError::new_err(ERR_BAD_DATA);
+                py_err.set_cause(py, Some(detail));
+                py_err
+            }
+            other => {
+                let py_err = PyValueError::new_err(format!("Database error: {other}"));
+                py_err.set_cause(py, py_cause);
+                py_err
+            }
         }
     }
 

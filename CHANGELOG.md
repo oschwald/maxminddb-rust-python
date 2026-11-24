@@ -36,6 +36,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RuntimeError: Already borrowed`, mostly on free-threaded Python. Threads
   that share an iterator take turns, and each network goes to only one of
   them.
+- A `MemoryError` raised while decoding a record now propagates as
+  `MemoryError`. Before, it was reported as an `InvalidDatabaseError`, as if
+  the database were corrupt, or as a `PanicException` when Python could not
+  allocate a value. Other unexpected Python errors from decoding also
+  propagate as they are.
+- `InvalidDatabaseError` from a lookup or from opening a database now has
+  `__cause__` set to an `InvalidDatabaseError` with the decoder's message,
+  such as the offset of the bad data. When a string is not valid UTF-8, that
+  error's `__cause__` is the `UnicodeDecodeError`. Iteration errors set the
+  `UnicodeDecodeError` as their own `__cause__`. The exception messages are
+  unchanged.
 
 ### Removed
 
