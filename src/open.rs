@@ -2,17 +2,67 @@ use crate::{InvalidDatabaseError, Reader, ReaderSource};
 use arc_swap::ArcSwapOption;
 use maxminddb::Reader as MaxMindReader;
 use memmap2::Mmap;
-use pyo3::{
-    exceptions::{PyFileNotFoundError, PyIOError},
-    prelude::*,
+use pyo3::{exceptions::PyOSError, prelude::*};
+use std::{
+    fmt,
+    fs::File,
+    io::{self, Read},
+    path::Path,
 };
-use std::{fmt, fs::File, path::Path};
+
+/// Convert an I/O error from opening `path` into a Python `OSError`.
+///
+/// Build the exception from `(errno, strerror, filename)`, as `open()` does,
+/// so Python picks the subclass (`FileNotFoundError`, `PermissionError`,
+/// `IsADirectoryError`, ...) and sets `errno` and `filename`. On Windows the
+/// raw code is a Windows error code, so pass it as `winerror` and let Python
+/// map it to `errno`.
+fn os_error(err: &io::Error, path: &Path) -> PyErr {
+    os_error_with_context(err, path, None)
+}
+
+/// Like [`os_error`], with `context` put in front of the OS's description.
+fn os_error_with_context(err: &io::Error, path: &Path, context: Option<&str>) -> PyErr {
+    let Some(code) = err.raw_os_error() else {
+        return PyErr::from(io::Error::new(
+            err.kind(),
+            format!("{err}: {}", path.display()),
+        ));
+    };
+
+    // Rust's message for an OS error ends with " (os error N)". Python shows
+    // the code itself, so keep only the OS's description.
+    let message = err.to_string();
+    let strerror = message
+        .strip_suffix(&format!(" (os error {code})"))
+        .map_or_else(|| message.clone(), str::to_owned);
+    let strerror = match context {
+        Some(context) => format!("{context}: {strerror}"),
+        None => strerror,
+    };
+    let filename = path.as_os_str().to_os_string();
+
+    #[cfg(windows)]
+    {
+        PyOSError::new_err((code, strerror, filename, code))
+    }
+    #[cfg(not(windows))]
+    {
+        PyOSError::new_err((code, strerror, filename))
+    }
+}
 
 fn open_file(path: &Path) -> PyResult<File> {
-    File::open(path).map_err(|err| match err.kind() {
-        std::io::ErrorKind::NotFound => PyFileNotFoundError::new_err(err.to_string()),
-        _ => PyIOError::new_err(err.to_string()),
-    })
+    let file = File::open(path).map_err(|err| os_error(&err, path))?;
+    // Opening a directory succeeds on Unix, and mapping it then fails with an
+    // unrelated error (ENODEV on Linux). Read from it instead, so the OS
+    // reports the error that `open()` in Python would (EISDIR).
+    if file.metadata().is_ok_and(|metadata| metadata.is_dir()) {
+        if let Err(err) = (&file).read(&mut [0; 1]) {
+            return Err(os_error(&err, path));
+        }
+    }
+    Ok(file)
 }
 
 fn create_reader(source: ReaderSource) -> Reader {
@@ -54,10 +104,7 @@ pub(crate) fn open_database_mmap(path: &Path) -> PyResult<Reader> {
     let reader = load_reader(path, |path| {
         let file = open_file(path)?;
         // Safety: The mmap is read-only and the file won't be modified.
-        unsafe {
-            Mmap::map(&file)
-                .map_err(|err| PyIOError::new_err(format!("Failed to memory-map database: {err}")))
-        }
+        unsafe { Mmap::map(&file).map_err(|err| os_error(&err, path)) }
     })?;
 
     Ok(create_reader(ReaderSource::Mmap(reader)))
@@ -66,10 +113,7 @@ pub(crate) fn open_database_mmap(path: &Path) -> PyResult<Reader> {
 /// Open a MaxMind DB by loading the entire file into memory (MODE_MEMORY).
 pub(crate) fn open_database_memory(path: &Path) -> PyResult<Reader> {
     let reader = load_reader(path, |path| {
-        std::fs::read(path).map_err(|err| match err.kind() {
-            std::io::ErrorKind::NotFound => PyFileNotFoundError::new_err(err.to_string()),
-            _ => PyIOError::new_err(format!("Failed to read database file: {err}")),
-        })
+        std::fs::read(path).map_err(|err| os_error(&err, path))
     })?;
 
     Ok(create_reader(ReaderSource::Memory(reader)))
