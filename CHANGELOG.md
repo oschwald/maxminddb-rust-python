@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Releases now include musllinux wheels for x86_64 and aarch64, so pip no
+  longer needs a Rust toolchain to install the package on Alpine and other
+  musl-based Linux distributions.
+
 ### Fixed
 
 - Wheels no longer install `py.typed` and `maxminddb_rust.pyi` directly into
