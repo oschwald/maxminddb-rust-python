@@ -8,7 +8,7 @@ from collections.abc import Iterable, Iterator, Sequence
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 from os import PathLike
 from types import TracebackType
-from typing import Any, BinaryIO, Literal
+from typing import Any, BinaryIO, Literal, final
 
 __all__ = [  # noqa: RUF022 - Match the extension export order.
     "Reader",
@@ -34,6 +34,7 @@ MODE_FD: Literal[16]
 class InvalidDatabaseError(RuntimeError):
     """Exception raised when the MaxMind DB file is invalid or corrupt."""
 
+@final
 class Metadata:
     """Metadata about a MaxMind DB database."""
 
@@ -76,6 +77,7 @@ class Metadata:
     def search_tree_size(self) -> int:
         """The size of the search tree in bytes."""
 
+@final
 class Reader:
     """A MaxMind DB database reader.
 
@@ -86,10 +88,10 @@ class Reader:
     reader as MODE_MMAP.
     """
 
-    def __init__(
-        self, database: str | PathLike[str] | BinaryIO, mode: int = ...
-    ) -> None:
-        """Initialize a Reader for a MaxMind DB file.
+    def __new__(
+        cls, database: str | PathLike[str] | BinaryIO, mode: int = ...
+    ) -> Reader:
+        """Open a Reader for a MaxMind DB file.
 
         Args:
             database: Path to the MaxMind DB file, or a readable binary object
@@ -246,7 +248,7 @@ class Reader:
         methods will raise a ValueError.
         """
 
-    def __enter__(self) -> Reader:  # noqa: PYI034 - Reader cannot be subclassed.
+    def __enter__(self) -> Reader:
         """Enter the context manager (for use with 'with' statement).
 
         Returns:

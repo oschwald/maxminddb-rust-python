@@ -57,10 +57,7 @@ This project includes two types of tests:
 # Initialize test data submodule (first time only)
 git submodule update --init --recursive
 
-# Install test dependencies
-uv pip install pytest
-
-# Run all tests
+# Run all tests. uv installs pytest from the dev dependency group.
 uv run pytest
 
 # Run specific test directory
@@ -68,9 +65,6 @@ uv run pytest tests/maxmind/
 
 # Run with verbose output
 uv run pytest -v
-
-# Run with coverage
-uv run pytest --cov=maxminddb_rust
 ```
 
 ### Upstream Test Syncing
@@ -123,8 +117,8 @@ ruff check .
 # Format code with Ruff
 ruff format .
 
-# Type check with mypy
-mypy .
+# Check the type stub against the built extension (CI runs this)
+uv run python -m mypy.stubtest maxminddb_rust --allowlist stubtest-allowlist.txt
 ```
 
 #### Markdown and YAML

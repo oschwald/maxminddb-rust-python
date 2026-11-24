@@ -68,6 +68,34 @@ jobs:
       - name: Run ruff format check
         run: ruff format --check .
 
+  stubtest:
+    name: Stubtest on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest and newest stable versions we support.
+        python-version: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Check the type stub against the extension
+        run: >-
+          uv run python -m mypy.stubtest maxminddb_rust
+          --allowlist stubtest-allowlist.txt
+
   prettier:
     name: Prettier
     runs-on: ubuntu-latest

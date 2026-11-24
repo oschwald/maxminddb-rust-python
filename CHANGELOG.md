@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer needs a Rust toolchain to install the package on Alpine and other
   musl-based Linux distributions.
 
+### Changed
+
+- The type stub now marks `Reader` and `Metadata` as `@final`, since neither
+  can be subclassed at runtime, and declares the `Reader` constructor as
+  `__new__`. Type checkers now reject subclasses of these classes. CI checks
+  the stub against the extension with `mypy.stubtest`.
+
 ### Fixed
 
 - Wheels no longer install `py.typed` and `maxminddb_rust.pyi` directly into

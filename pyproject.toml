@@ -48,6 +48,14 @@ test = [
     "pytest>=9.0.2",
 ]
 
+[dependency-groups]
+# uv installs this group by default, so `uv run pytest` works in a fresh
+# checkout.
+dev = [
+    "maxminddb-rust[test]",
+    "mypy>=2.0",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
