@@ -182,6 +182,8 @@ class Reader:
         This is an extension method not available in the original maxminddb module.
         It provides better performance than calling get() repeatedly by reducing
         call overhead. This method keeps the GIL for the duration of the batch.
+        It runs signal handlers every few thousand addresses, so Ctrl-C can
+        interrupt a large batch.
 
         Args:
             ips: An iterable of IP address strings or ipaddress objects to look up
@@ -207,7 +209,8 @@ class Reader:
 
         This extension combines get_many() batching with get_path() selective
         decoding. It parses the path once and avoids decoding full records when
-        only one field is needed.
+        only one field is needed. Like get_many(), it runs signal handlers every
+        few thousand addresses.
 
         Args:
             ips: An iterable of IP address strings or ipaddress objects to look up
@@ -272,7 +275,8 @@ class Reader:
 
         Returns an iterator that yields (network, data) tuples for all networks
         in the database. Networks are represented as ipaddress.IPv4Network or
-        ipaddress.IPv6Network objects.
+        ipaddress.IPv6Network objects. Threads can share one iterator. Each
+        network is then yielded to only one of them.
 
         Yields:
             Tuples of (network, record) for each entry in the database.

@@ -7,16 +7,23 @@ use memmap2::Mmap;
 use pyo3::{
     exceptions::{PyAttributeError, PyRuntimeError, PyTypeError, PyValueError},
     prelude::*,
-    sync::PyOnceLock,
+    sync::{MutexExt, PyOnceLock},
     types::{PyDict, PyList, PyTuple, PyType},
 };
 use self_cell::self_cell;
-use std::{str::FromStr, sync::Arc};
+use std::{
+    cell::Cell,
+    str::FromStr,
+    sync::{Arc, Mutex, TryLockError},
+};
 
 /// Iterator for Reader that yields `(network, record)` tuples.
-#[pyclass(module = "maxminddb_rust")]
+///
+/// Threads can share one iterator. They take turns advancing it, and each
+/// network is returned to one thread only.
+#[pyclass(module = "maxminddb_rust", frozen)]
 pub(crate) struct ReaderIterator {
-    iter: ReaderWithin,
+    iter: Mutex<ReaderWithin>,
     cache: IpaddressCache,
 }
 
@@ -50,8 +57,78 @@ impl ReaderIterator {
 
         let cache = IpaddressCache::new(py)?;
 
-        Ok(Self { iter, cache })
+        Ok(Self {
+            iter: Mutex::new(iter),
+            cache,
+        })
     }
+
+    /// Advance the shared iterator. Holds the lock only for the Rust
+    /// iteration and decoding, not while the network objects are built.
+    fn next_item(&self, py: Python<'_>) -> PyResult<Option<WithinResult>> {
+        let mut iter = match self.iter.try_lock() {
+            Ok(guard) => guard,
+            Err(TryLockError::Poisoned(_)) => return Err(poisoned_error()),
+            Err(TryLockError::WouldBlock) => {
+                // Decoding allocates Python objects, and before Python 3.12
+                // that can run a GC finalizer. A finalizer that calls
+                // `__next__` while this thread holds an iterator lock must not
+                // wait: the lock may be its own, or held by a thread that
+                // waits for this one.
+                if HELD_LOCKS.get() > 0 {
+                    return Err(PyRuntimeError::new_err(
+                        "ReaderIterator.__next__ called from code that runs while this thread \
+                         is advancing a ReaderIterator",
+                    ));
+                }
+                // Detach while waiting, so the thread that holds the lock
+                // can still run Python code and the garbage collector.
+                self.iter
+                    .lock_py_attached(py)
+                    .map_err(|_| poisoned_error())?
+            }
+        };
+        let next_item = {
+            let _held = HeldLock::new();
+            iter.next()
+        };
+        drop(iter);
+        match next_item {
+            Some(result) => result
+                .map(Some)
+                .map_err(|err| InvalidDatabaseError::new_err(format!("Iteration error: {err}"))),
+            None => Ok(None),
+        }
+    }
+}
+
+thread_local! {
+    /// How many `ReaderIterator` locks this thread holds.
+    static HELD_LOCKS: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Counts a lock in `HELD_LOCKS` until dropped.
+struct HeldLock;
+
+impl HeldLock {
+    #[inline]
+    fn new() -> Self {
+        HELD_LOCKS.set(HELD_LOCKS.get() + 1);
+        Self
+    }
+}
+
+impl Drop for HeldLock {
+    #[inline]
+    fn drop(&mut self) {
+        HELD_LOCKS.set(HELD_LOCKS.get() - 1);
+    }
+}
+
+/// The error for an iterator whose lock was poisoned by a panic. The panic may
+/// have left the iteration state half updated, so the iterator stops.
+fn poisoned_error() -> PyErr {
+    PyRuntimeError::new_err("ReaderIterator cannot continue after an earlier panic")
 }
 
 #[pymethods]
@@ -60,11 +137,9 @@ impl ReaderIterator {
         slf
     }
 
-    fn __next__(&mut self, py: Python) -> PyResult<Option<(Py<PyAny>, Py<PyAny>)>> {
-        let next_item = match self.iter.next() {
-            Some(result) => result
-                .map_err(|err| InvalidDatabaseError::new_err(format!("Iteration error: {err}")))?,
-            None => return Ok(None),
+    fn __next__(&self, py: Python) -> PyResult<Option<(Py<PyAny>, Py<PyAny>)>> {
+        let Some(next_item) = self.next_item(py)? else {
+            return Ok(None);
         };
         let network_obj = self.cache.new_network(py, next_item.ip_net)?.unbind();
         let data_obj = next_item.data.into_py();

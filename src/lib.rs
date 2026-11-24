@@ -357,7 +357,8 @@ impl Reader {
     /// This is an extension method not available in the original maxminddb module.
     /// It provides better performance than calling get() repeatedly by reducing
     /// call overhead. This method does not release the Python GIL while
-    /// processing the batch.
+    /// processing the batch. It runs signal handlers every few thousand
+    /// addresses, so Ctrl-C can interrupt a large batch.
     ///
     /// Args:
     ///     ips: An iterable of IP address strings or ipaddress objects to look up
@@ -401,7 +402,8 @@ impl Reader {
     ///
     /// This extension combines get_many() batching with get_path() selective
     /// decoding. It parses the path once and avoids decoding full records when
-    /// only one field is needed.
+    /// only one field is needed. Like get_many(), it runs signal handlers every
+    /// few thousand addresses.
     ///
     /// Args:
     ///     ips: An iterable of IP address strings or ipaddress objects to look up
@@ -521,7 +523,8 @@ impl Reader {
     ///
     /// Returns an iterator that yields (network, data) tuples for all networks
     /// in the database. Networks are represented as ipaddress.IPv4Network or
-    /// ipaddress.IPv6Network objects.
+    /// ipaddress.IPv6Network objects. Threads can share one iterator. Each
+    /// network is then yielded to only one of them.
     ///
     /// Returns:
     ///     An iterator yielding tuples of (network, record) for each entry.
@@ -707,12 +710,14 @@ impl Reader {
         // path below.
         if let Ok(list) = ips.cast_exact::<PyList>() {
             objects = Vec::with_capacity(list.len());
-            for ip in list.iter() {
+            for (index, ip) in list.iter().enumerate() {
+                check_signals_every(py, index)?;
                 objects.push(lookup(self.parse_lookup_ip(&ip)?)?);
             }
         } else if let Ok(tuple) = ips.cast_exact::<PyTuple>() {
             objects = Vec::with_capacity(tuple.len());
-            for ip in tuple.as_slice() {
+            for (index, ip) in tuple.as_slice().iter().enumerate() {
+                check_signals_every(py, index)?;
                 objects.push(lookup(self.parse_lookup_ip(ip)?)?);
             }
         } else {
@@ -731,12 +736,27 @@ impl Reader {
             // Do not pre-size from `__len__`: a user iterable can report any
             // length, and a huge one would overflow or exhaust the allocation.
             objects = Vec::new();
-            for ip in iterator {
+            for (index, ip) in iterator.enumerate() {
+                check_signals_every(py, index)?;
                 objects.push(lookup(self.parse_lookup_ip(&ip?)?)?);
             }
         }
         Ok(PyList::new(py, objects)?.into_any().unbind())
     }
+}
+
+/// How many addresses a batch lookup handles between checks for signals.
+const SIGNAL_CHECK_INTERVAL: usize = 4096;
+
+/// Run pending signal handlers, such as the `KeyboardInterrupt` for Ctrl-C,
+/// every `SIGNAL_CHECK_INTERVAL` items. A batch of strings runs no Python code,
+/// so Python would otherwise handle the signal only after the whole batch.
+#[inline]
+fn check_signals_every(py: Python<'_>, index: usize) -> PyResult<()> {
+    if index % SIGNAL_CHECK_INTERVAL == SIGNAL_CHECK_INTERVAL - 1 {
+        py.check_signals()?;
+    }
+    Ok(())
 }
 
 /// Reject a str or bytes-like `ips`, which would otherwise iterate by character.

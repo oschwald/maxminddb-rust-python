@@ -32,10 +32,11 @@ and the hardware. [BENCHMARKS.md](https://github.com/oschwald/maxminddb-rust-pyt
 describes the method, compares more readers, and shows how to run the
 benchmarks yourself.
 
-The reader is thread-safe and can be shared across threads. On standard CPython
-builds, CPU-bound lookups from Python threads remain constrained by the GIL.
-Free-threaded CPython 3.14 and 3.15 wheels allow lookup threads to run
-concurrently.
+The reader is thread-safe and can be shared across threads. So can an iterator
+over the reader: threads that share one take turns, and each network goes to
+only one thread. On standard CPython builds, CPU-bound lookups from Python
+threads remain constrained by the GIL. Free-threaded CPython 3.14 and 3.15
+wheels allow lookup threads to run concurrently.
 
 ## Installation
 
