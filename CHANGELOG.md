@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `site-packages`. The type stub and `py.typed` marker are still installed in
   the `maxminddb_rust` package. A top-level `py.typed` could be removed when
   another package that installs the same file was uninstalled.
+- Lookup methods now accept subclasses of `ipaddress.IPv4Address` and
+  `ipaddress.IPv6Address`, including `ipaddress.IPv4Interface` and
+  `ipaddress.IPv6Interface`. They previously raised `TypeError`. This matches
+  the `maxminddb` module, which accepts them.
 
 ### Removed
 
