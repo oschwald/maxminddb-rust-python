@@ -1,8 +1,13 @@
-use crate::{InvalidDatabaseError, Reader, ReaderSource};
+use crate::{InvalidDatabaseError, OpenMode, Reader, ReaderSource};
 use arc_swap::ArcSwapOption;
 use maxminddb::{MaxMindDbError, Reader as MaxMindReader};
 use memmap2::Mmap;
-use pyo3::{exceptions::PyOSError, prelude::*};
+use pyo3::{
+    buffer::PyBuffer,
+    exceptions::{PyOSError, PyTypeError, PyUnicodeDecodeError},
+    prelude::*,
+    types::{PyBool, PyByteArray, PyBytes, PyInt, PyString},
+};
 use std::{
     fmt,
     fs::File,
@@ -117,19 +122,113 @@ pub(crate) fn open_database_memory(path: &Path) -> PyResult<Reader> {
     Ok(create_reader(ReaderSource::Memory(reader)))
 }
 
-/// Open a MaxMind DB from a file-like object's current position (MODE_FD).
+/// Open a MaxMind DB from a file-like object's current position (MODE_FD, or
+/// MODE_AUTO with a file object).
 ///
 /// This mirrors the official package's pure Python reader behavior: the object
-/// must provide `read()`. Raw integer OS file descriptors are not accepted.
+/// must provide `read()`, which must return bytes. Raw integer OS file
+/// descriptors are not accepted.
 pub(crate) fn open_database_fd(database: &Bound<'_, PyAny>) -> PyResult<Reader> {
     let filename = fd_database_name(database)?;
-    let buffer = database.call_method0("read")?.extract::<Vec<u8>>()?;
     let py = database.py();
+    let contents = database
+        .call_method0(pyo3::intern!(py, "read"))
+        .map_err(|err| {
+            if err.is_instance_of::<PyUnicodeDecodeError>(py) {
+                let type_err = PyTypeError::new_err(
+                    "The database file object is a text file. Open it in binary mode.",
+                );
+                type_err.set_cause(py, Some(err));
+                type_err
+            } else {
+                err
+            }
+        })?;
+    let buffer = if let Ok(bytes) = contents.cast::<PyBytes>() {
+        bytes.as_bytes().to_vec()
+    } else if let Ok(bytes) = contents.cast::<PyByteArray>() {
+        bytes.to_vec()
+    } else if contents.is_instance_of::<PyString>() {
+        return Err(PyTypeError::new_err(format!(
+            "The database file object returned {}, not bytes. Open it in binary mode.",
+            type_name(&contents)?
+        )));
+    } else {
+        // Other buffers, such as an mmap, as the official package accepts.
+        // Copy them through the buffer protocol where we can, which avoids
+        // extracting each byte as a Python int.
+        if let Ok(buffer) = PyBuffer::<u8>::get(&contents) {
+            buffer.to_vec(py)?
+        } else {
+            match contents.extract::<Vec<u8>>() {
+                Ok(buffer) => buffer,
+                Err(err) if err.is_instance_of::<PyTypeError>(py) => {
+                    let type_err = PyTypeError::new_err(format!(
+                        "The database file object returned {}, not bytes.",
+                        type_name(&contents)?
+                    ));
+                    type_err.set_cause(py, Some(err));
+                    return Err(type_err);
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    };
     let reader = py
         .detach(move || MaxMindReader::from_source(buffer))
         .map_err(|err| open_error(py, &filename, err))?;
 
     Ok(create_reader(ReaderSource::Memory(reader)))
+}
+
+/// Whether the database argument has a callable `read()`, as a file object has.
+pub(crate) fn has_callable_read(database: &Bound<'_, PyAny>) -> PyResult<bool> {
+    match database.getattr(pyo3::intern!(database.py(), "read")) {
+        Ok(read) => Ok(read.is_callable()),
+        Err(err) if err.is_instance_of::<pyo3::exceptions::PyAttributeError>(database.py()) => {
+            Ok(false)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+/// The TypeError for a database argument that does not suit the mode. The
+/// messages follow the official package's pure Python reader.
+pub(crate) fn unsupported_database_type(database: &Bound<'_, PyAny>, mode: OpenMode) -> PyErr {
+    let hint = match mode {
+        OpenMode::Auto => "Pass a path or a binary file object.",
+        OpenMode::Fd => {
+            "MODE_FD takes a binary file object. Use MODE_MMAP, MODE_FILE or MODE_MEMORY for a path."
+        }
+        _ => "Pass a path. Use MODE_FD for a file object.",
+    };
+    // An int, but not a bool, could be a file descriptor, which the official
+    // package accepts in some modes.
+    let descriptor_note =
+        if database.is_instance_of::<PyInt>() && !database.is_instance_of::<PyBool>() {
+            " File descriptors are not supported."
+        } else {
+            ""
+        };
+    match type_name(database) {
+        Ok(name) => PyTypeError::new_err(format!(
+            "Unsupported database type ({name}). {hint}{descriptor_note}"
+        )),
+        Err(err) => err,
+    }
+}
+
+/// The type's name, with its module unless it is a builtin, so that a
+/// zipfile.Path is not just "Path".
+fn type_name(value: &Bound<'_, PyAny>) -> PyResult<String> {
+    let value_type = value.get_type();
+    let qualname = value_type.qualname()?.to_string();
+    let module = value_type.module()?.to_string();
+    if module == "builtins" {
+        Ok(qualname)
+    } else {
+        Ok(format!("{module}.{qualname}"))
+    }
 }
 
 fn fd_database_name(database: &Bound<'_, PyAny>) -> PyResult<String> {

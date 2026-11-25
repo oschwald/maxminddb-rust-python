@@ -191,11 +191,12 @@ Includes tests and documentation updates.
 
 ## API Compatibility
 
-This project aims for 100% API compatibility with the official `maxminddb` Python module. When adding features:
+This project follows the `Reader` API of the official `maxminddb` Python module. When adding features:
 
 1. Match the exact API of the upstream module
 2. Add upstream compatibility tests when possible
-3. Document any intentional deviations or extensions
+3. Document any intentional deviations in the "Known Differences" section of
+   `MIGRATION.md`, and extensions in `README.md`
 4. Ensure type stubs match the runtime behavior
 
 ## Performance Considerations

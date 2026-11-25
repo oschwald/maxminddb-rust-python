@@ -136,7 +136,7 @@ Choose between memory-mapped files (default) and read-file modes:
 ```python
 import maxminddb_rust
 
-# MODE_AUTO: currently resolves to MODE_MMAP.
+# MODE_AUTO: memory-maps a path, or reads a binary file object into memory.
 reader = maxminddb_rust.open_database(
     "/var/lib/GeoIP/GeoIP2-City.mmdb", mode=maxminddb_rust.MODE_AUTO
 )
@@ -178,18 +178,24 @@ memory-mapped reader as `MODE_MMAP`.
 
 ### API Compatibility
 
-This package provides API compatibility with the official
+This package follows the `Reader` API of the official
 [`maxminddb`](https://github.com/maxmind/MaxMind-DB-Reader-python) Python
-module.
+module, and its compatibility tests are adapted from the official package's
+3.3.0 test suite. The
+[known differences](MIGRATION.md#known-differences) list where it deliberately
+differs; for example, it has no `maxminddb.errors` or `maxminddb.const`
+submodules and does not accept integer file descriptors.
 
 Supported:
 
 - `Reader` class with `get()`, `get_with_prefix_len()`, `metadata()`, and
   `close()` methods
-- `open_database()` function
+- `open_database()` function, with `str`, `bytes` and `os.PathLike` paths and
+  binary file objects
 - Context manager support (`with` statement)
-- MODE\_\* constants (`MODE_AUTO`, `MODE_MMAP`, `MODE_MMAP_EXT`, `MODE_FILE`,
-  `MODE_MEMORY`, and `MODE_FD`)
+- The `Mode` enum and the MODE\_\* constants (`MODE_AUTO`, `MODE_MMAP`,
+  `MODE_MMAP_EXT`, `MODE_FILE`, `MODE_MEMORY`, and `MODE_FD`)
+- `__version__`
 - `InvalidDatabaseError` exception
 - `Metadata` class with all attributes and computed properties
 - Support for string IP addresses and `ipaddress.IPv4Address`/`IPv6Address`

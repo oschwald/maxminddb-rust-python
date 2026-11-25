@@ -7,13 +7,14 @@ This guide explains how to migrate from the official `maxminddb` package to `max
 `maxminddb-rust` can offer significant performance improvements over the official `maxminddb` package:
 
 - Benchmarkable Rust-backed lookup performance
-- Same API, just better performance
+- The same `Reader` API for typical use, with a few
+  [known differences](#known-differences)
 - All open modes supported
-- Additional `get_many()` method for batch lookups
+- Additional `get_many()`, `get_path()` and `get_many_path()` methods
 
 ## Quick Migration
 
-The only change required is updating your import statement:
+For typical use, the only change required is updating your import statement:
 
 ### Before (official maxminddb)
 
@@ -33,7 +34,10 @@ reader = maxminddb_rust.open_database("/path/to/GeoIP2-City.mmdb")
 result = reader.get("8.8.8.8")
 ```
 
-That's it! All other code remains identical.
+Code that uses the `Reader` API this way needs no other changes. Check the
+[known differences](#known-differences) if your code imports the official
+package's submodules, passes integer file descriptors or relies on its exact
+error messages.
 
 ## Automated Migration
 
@@ -60,16 +64,21 @@ This allows gradual migration while maintaining compatibility.
 
 ### Option 3: Shell Script Migration
 
-For Unix-like systems:
+For Unix-like systems with GNU sed:
 
 ```bash
 # Find all Python files using maxminddb
 find . -name "*.py" -type f -exec grep -l "import maxminddb" {} \;
 
-# Replace imports in place (review before running!)
-find . -name "*.py" -type f -exec sed -i 's/import maxminddb$/import maxminddb_rust/g' {} \;
-find . -name "*.py" -type f -exec sed -i 's/from maxminddb /from maxminddb_rust /g' {} \;
+# Replace imports in place (review before running!). The alias keeps later
+# uses such as maxminddb.open_database() and maxminddb.MODE_MEMORY working.
+find . -name "*.py" -type f -exec sed -i 's/^\([[:space:]]*\)import maxminddb$/\1import maxminddb_rust as maxminddb/' {} \;
+find . -name "*.py" -type f -exec sed -i 's/^\([[:space:]]*\)from maxminddb import /\1from maxminddb_rust import /' {} \;
 ```
+
+Imports from the official package's submodules, such as `maxminddb.errors` or
+`maxminddb.const`, need a manual change because `maxminddb_rust` has no
+submodules. Import the same names from `maxminddb_rust` instead.
 
 ## Installation
 
@@ -100,35 +109,72 @@ import maxminddb  # Use official implementation (if still needed)
 
 ## API Compatibility
 
-### Fully Compatible Features
+The compatibility tests in `tests/maxmind/` are adapted from the official
+package's 3.3.0 test suite. The [known differences](#known-differences) below
+are the places where this package deliberately behaves differently.
 
-✅ **100% compatible** - No code changes needed:
+### Supported Features
 
-- `Reader` class and all methods
-- `open_database()` function
-- `get()`, `get_with_prefix_len()`, `metadata()`, `close()`
+These work the same way as in the official package:
+
+- `Reader` class with `get()`, `get_with_prefix_len()`, `metadata()`,
+  `close()` and the `closed` attribute
+- `open_database()` function, with `str`, `bytes` and `os.PathLike` paths and
+  binary file objects
 - Context manager support (`with` statement)
 - Iterator support (iterating over all networks)
 - `Metadata` class and all properties
-- MODE_AUTO, MODE_MMAP, MODE_MMAP_EXT, MODE_FILE, MODE_MEMORY, MODE_FD
-  constants
+- The `Mode` enum and the `MODE_AUTO`, `MODE_MMAP`, `MODE_MMAP_EXT`,
+  `MODE_FILE`, `MODE_MEMORY` and `MODE_FD` constants
 - `InvalidDatabaseError` exception
+- `__version__`
 - String and ipaddress object support
 
 ### Extension Features
 
 ⭐ **Bonus features** in `maxminddb-rust`:
 
-- `get_many()` - Batch IP lookup method (not in official package)
+- `get_many()` - Batch IP lookup method
+- `get_path()` - Retrieve one field of a record without decoding the whole
+  record
+- `get_many_path()` - Retrieve one field for many IP addresses
 
 ### Mode Notes
 
 `MODE_FD` is supported for readable binary objects, matching the official package's pure Python reader behavior. It reads from the object's current position and implies `MODE_MEMORY`. Raw integer OS file descriptors are not accepted directly.
 
-`MODE_AUTO` currently resolves to `MODE_MMAP`. `MODE_MMAP_EXT` is accepted for
-compatibility with the official package, but `maxminddb-rust` does not have a
-separate C extension backend; it uses the same Rust memory-mapped reader as
-`MODE_MMAP`.
+`MODE_AUTO` memory-maps a path and reads a binary file object into memory, as
+the official package does. `MODE_MMAP_EXT` is accepted for compatibility with
+the official package, but `maxminddb-rust` does not have a separate C extension
+backend; it uses the same Rust memory-mapped reader as `MODE_MMAP`.
+
+### Known Differences
+
+These differences from the official `maxminddb` 3.3.0 package are deliberate:
+
+- There are no `maxminddb.errors`, `maxminddb.const`, `maxminddb.types`,
+  `maxminddb.reader`, `maxminddb.decoder` or `maxminddb.extension`
+  submodules. Import `InvalidDatabaseError`, `Mode` and the `MODE_*` constants
+  from `maxminddb_rust` itself.
+- Integer OS file descriptors are not accepted as the database argument, in any
+  mode. Pass a path or a binary file object instead.
+- `Reader` has no reader to reinitialize: calling `__init__()` again does not
+  reopen it, and `Reader.__new__()` needs a database.
+- An iterator that is still running when the reader is closed finishes instead
+  of raising `ValueError`.
+- IPv4 addresses with leading zeros, such as `01.1.1.1`, raise `ValueError`.
+  The official C extension accepts them; its pure Python reader rejects them.
+- Error messages for corrupt databases differ, and some come from the Rust
+  `maxminddb` crate. The exception types are the same.
+- A database with a `build_epoch` of 0 opens without an error.
+- A map key stored as bytes rather than as a string is decoded as a string
+  instead of raising `InvalidDatabaseError`.
+- When iterating a corrupt database whose search tree points back to its root,
+  the iterator can return some networks before it raises
+  `InvalidDatabaseError`.
+- `__version__` is listed in `__all__`, because the package re-exports the
+  extension module's `__all__`. So `from maxminddb_rust import *` also imports
+  `__version__`.
 
 ## Example Migration
 
@@ -247,7 +293,7 @@ import maxminddb  # Official package
 | Import name       | `import maxminddb` | `import maxminddb_rust` |
 | Performance       | Baseline           | Measure with benchmarks |
 | Implementation    | Pure Python + C    | Rust (PyO3)             |
-| API compatibility | N/A                | 100%                    |
+| API compatibility | N/A                | Reader API, see above   |
 | get_many()        | ❌                 | ✅                      |
 | MODE_FILE         | ✅                 | ✅                      |
 | MODE_FD           | ✅                 | ✅                      |
@@ -259,7 +305,9 @@ import maxminddb  # Official package
 A: No, this is an unofficial high-performance alternative. The official package is maintained by MaxMind.
 
 **Q: Will my code break?**
-A: No, the API is 100% compatible. Only the import name changes.
+A: Code that uses the `Reader` API needs only the import change. Code that
+imports the official package's submodules or relies on the
+[known differences](#known-differences) needs small changes.
 
 **Q: Can I use both packages?**
 A: Yes, you can have both installed and choose which to use in your code.
