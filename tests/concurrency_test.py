@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
-from itertools import islice
+from itertools import chain, islice
 from pathlib import Path
 from threading import Barrier, Event
 from time import sleep
+from typing import TYPE_CHECKING
 
 import maxminddb_rust
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 DATA_DIR = Path(__file__).parent / "data" / "test-data"
 CITY_DB = DATA_DIR / "GeoIP2-City-Test.mmdb"
@@ -72,3 +77,29 @@ def test_close_during_concurrent_lookups_only_reports_closed_reader() -> None:
 
     assert reader.closed
     assert sum(operations) > 0
+
+
+def test_threads_can_share_one_iterator() -> None:
+    reader = maxminddb_rust.open_database(CITY_DB)
+    threads = 8
+
+    def worker(start: Barrier, iterator: Iterator[tuple[object, object]]) -> list[str]:
+        start.wait(timeout=10)
+        return [str(network) for network, _ in iterator]
+
+    try:
+        expected = Counter(str(network) for network, _ in reader)
+        # Several rounds, so the threads overlap on free-threaded builds.
+        for _ in range(10):
+            iterator = iter(reader)
+            start = Barrier(threads)
+            with ThreadPoolExecutor(max_workers=threads) as executor:
+                futures = [
+                    executor.submit(worker, start, iterator) for _ in range(threads)
+                ]
+                networks = [future.result() for future in futures]
+
+            # Each network was returned to exactly one thread.
+            assert Counter(chain.from_iterable(networks)) == expected
+    finally:
+        reader.close()

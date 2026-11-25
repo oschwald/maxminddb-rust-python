@@ -287,3 +287,56 @@ with maxminddb_rust.open_database(sys.argv[1]) as reader:
     subprocess.run(  # noqa: S603 - Fixed argument vector; no shell.
         [sys.executable, "-c", code, str(db_path)], check=True
     )
+
+
+def test_iterator_reentered_by_finalizer_raises_instead_of_hanging() -> None:
+    # Before Python 3.12, decoding a record can run the garbage collector, and
+    # a finalizer can call next() on the iterator that is decoding. That call
+    # must raise RuntimeError rather than wait for its own thread. Later
+    # versions run the collector between bytecodes, so the finalizer runs
+    # outside the decode. A subprocess with a timeout reports a hang.
+    code = """
+import gc
+import sys
+
+import maxminddb_rust
+
+with maxminddb_rust.open_database(sys.argv[1]) as reader:
+    expected = [str(net) for net, _ in reader]
+    iterator = iter(reader)
+    networks = []
+    errors = []
+
+    class Cycle:
+        def __init__(self):
+            self.cycle = self
+
+        def __del__(self):
+            try:
+                networks.append(str(next(iterator)[0]))
+            except StopIteration:
+                pass
+            except RuntimeError as err:
+                errors.append(str(err))
+            if len(networks) + len(errors) < 50:
+                Cycle()
+
+    threshold = gc.get_threshold()
+    gc.set_threshold(1)
+    try:
+        Cycle()
+        for net, _ in iterator:
+            networks.append(str(net))
+    finally:
+        gc.set_threshold(*threshold)
+
+    assert sorted(networks) == sorted(expected)
+    assert set(errors) <= {
+        "ReaderIterator.__next__ called from code that runs while this thread "
+        "is advancing a ReaderIterator"
+    }
+"""
+    db_path = Path(__file__).parent / "data" / "test-data" / "GeoIP2-City-Test.mmdb"
+    subprocess.run(  # noqa: S603 - Fixed argument vector; no shell.
+        [sys.executable, "-c", code, str(db_path)], check=True, timeout=60
+    )

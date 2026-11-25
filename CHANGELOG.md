@@ -29,6 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   callers can catch `PermissionError` or `IsADirectoryError` or check
   `err.errno`. Opening a directory now raises the same error as `open()` in
   every mode (`IsADirectoryError` on Linux and macOS).
+- `get_many` and `get_many_path` now run signal handlers every few thousand
+  addresses, so Ctrl-C interrupts a large batch instead of waiting for it to
+  finish.
+- Threads can now share one iterator over a `Reader`. Sharing one raised
+  `RuntimeError: Already borrowed`, mostly on free-threaded Python. Threads
+  that share an iterator take turns, and each network goes to only one of
+  them.
 
 ### Removed
 
