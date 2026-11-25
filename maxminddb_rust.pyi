@@ -98,7 +98,9 @@ class Reader:
 
         Raises:
             FileNotFoundError: If the database file does not exist.
-            IOError: If the database file cannot be read or memory-mapped.
+            OSError: If the database file cannot be opened, read or memory-mapped.
+                OS errors set ``errno`` and ``filename``, so the subclass
+                matches the cause, as with ``open()``.
             InvalidDatabaseError: If the file is not a valid MaxMind DB file.
             ValueError: If an unsupported mode is specified.
 
@@ -301,7 +303,9 @@ def open_database(database: str | PathLike[str] | BinaryIO, mode: int = ...) -> 
 
     Raises:
         FileNotFoundError: If the database file does not exist.
-        IOError: If the database file cannot be read or memory-mapped.
+        OSError: If the database file cannot be opened, read or memory-mapped.
+            OS errors set ``errno`` and ``filename``, so the subclass
+            matches the cause, as with ``open()``.
         InvalidDatabaseError: If the file is not a valid MaxMind DB file.
         ValueError: If an unsupported mode is specified.
 

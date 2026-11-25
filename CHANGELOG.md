@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ipaddress.IPv6Address`, including `ipaddress.IPv4Interface` and
   `ipaddress.IPv6Interface`. They previously raised `TypeError`. This matches
   the `maxminddb` module, which accepts them.
+- `open_database` now raises `OSError` with `errno` and `filename` set when it
+  cannot open, read or map the database file, as `open()` and the `maxminddb`
+  package do. The message names the file, and Python picks the subclass, so
+  callers can catch `PermissionError` or `IsADirectoryError` or check
+  `err.errno`. Opening a directory now raises the same error as `open()` in
+  every mode (`IsADirectoryError` on Linux and macOS).
 
 ### Removed
 
