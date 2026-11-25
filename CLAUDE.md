@@ -8,6 +8,10 @@
 - `cargo clippy --all-targets -- -D warnings`, `ruff check .`,
   `ruff format --check .`, `prettier --check "**/*.md" "**/*.yml"` - what CI
   lints
+- CI checks `maxminddb_rust.pyi` against the built extension with
+  `uv run python -m mypy.stubtest maxminddb_rust --allowlist stubtest-allowlist.txt`.
+  It builds into uv's project venv, not the active venv; add `-p 3.10` after
+  `uv run` to check 3.10
 - Oldest supported Python is 3.10: run the suite there too. Create and activate
   a venv outside the repo (`uv venv -p 3.10 /tmp/venv-3.10`, then
   `. /tmp/venv-3.10/bin/activate`), then run the build and test command above.

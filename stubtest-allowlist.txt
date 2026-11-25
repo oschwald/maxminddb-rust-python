@@ -1,0 +1,4 @@
+# maturin installs the extension as maxminddb_rust/maxminddb_rust.*.so and
+# re-exports it from maxminddb_rust/__init__.py. The stub describes the public
+# package, so the inner extension module has no stub of its own.
+maxminddb_rust.maxminddb_rust
