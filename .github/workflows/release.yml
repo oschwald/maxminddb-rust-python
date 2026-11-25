@@ -151,9 +151,174 @@ jobs:
           name: maxminddb-rust-whl-pyodide-wasm32
           path: wheelhouse/*.whl
 
+  test_wheels:
+    name: Test ${{ matrix.platform.artifact }} wheel with Python ${{ matrix.python == 'oldest' && matrix.platform.oldest || matrix.python }}
+    needs: [build_wheels]
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each wheel is tested on a runner of its own architecture, so
+        # cross-compiled and QEMU-built wheels are imported natively.
+        platform:
+          - runner: ubuntu-latest
+            artifact: ubuntu-latest-x86_64
+            oldest: "3.10"
+          - runner: ubuntu-24.04-arm
+            artifact: ubuntu-latest-aarch64
+            oldest: "3.10"
+          - runner: macos-15-intel
+            artifact: macos-latest-x86_64
+            oldest: "3.10"
+          - runner: macos-latest
+            artifact: macos-latest-aarch64
+            oldest: "3.10"
+          - runner: windows-latest
+            artifact: windows-latest-x86_64
+            oldest: "3.10"
+          - runner: windows-11-arm
+            artifact: windows-latest-aarch64
+            oldest: "3.11"
+        # The oldest supported Python and the newest free-threaded one.
+        python: [oldest, "3.15t"]
+    env:
+      PYTHON_VERSION: ${{ matrix.python == 'oldest' && matrix.platform.oldest || matrix.python }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Download wheels
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: maxminddb-rust-whl-${{ matrix.platform.artifact }}
+          path: dist
+
+      - name: Install wheel
+        shell: bash
+        run: >-
+          python -m pip install --only-binary=:all: --no-index
+          --find-links dist maxminddb-rust
+
+      - name: Look up an address
+        shell: bash
+        env:
+          # Makes the smoke test fail if the free-threaded interpreter was not
+          # installed, instead of skipping the GIL check.
+          SMOKE_TEST_ARGS: ${{ endsWith(env.PYTHON_VERSION, 't') && '--free-threaded' || '' }}
+        run: >-
+          python dev-bin/smoke_test.py $SMOKE_TEST_ARGS
+          tests/data/test-data/GeoIP2-City-Test.mmdb
+
+  test_musllinux_wheels:
+    name: Test ${{ matrix.platform.artifact }} wheel with Python ${{ matrix.python }} on Alpine
+    needs: [build_wheels]
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Alpine containers on a runner of the wheel's own architecture, so
+        # the aarch64 wheel runs natively rather than under QEMU.
+        platform:
+          - runner: ubuntu-latest
+            artifact: ubuntu-latest-x86_64-musllinux_1_2
+          - runner: ubuntu-24.04-arm
+            artifact: ubuntu-latest-aarch64-musllinux_1_2
+        python: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Download wheels
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: maxminddb-rust-whl-${{ matrix.platform.artifact }}
+          path: dist
+
+      - name: Install wheel and look up an address
+        env:
+          PYTHON_IMAGE: python:${{ matrix.python }}-alpine
+        run: |
+          docker run --rm -v "$PWD:/src:ro" -w /src "$PYTHON_IMAGE" sh -c \
+            'pip install --only-binary=:all: --no-index --find-links dist maxminddb-rust &&
+            python dev-bin/smoke_test.py tests/data/test-data/GeoIP2-City-Test.mmdb'
+
+  test_sdist:
+    name: Build and test from the source distribution
+    needs: [build_sdist]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.x"
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Download sdist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: maxminddb-rust-sdist
+          path: dist
+
+      - name: Build and install from the sdist
+        run: python -m pip install --no-binary=maxminddb-rust dist/*.tar.gz pytest
+
+      - name: Look up an address
+        run: >-
+          python dev-bin/smoke_test.py
+          tests/data/test-data/GeoIP2-City-Test.mmdb
+
+      - name: Run tests
+        run: pytest -v tests/
+
+  check_versions:
+    name: Check artifact versions
+    needs: [build_wheels, build_sdist, build_wasm_wheels]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.x"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: maxminddb-rust-*
+          path: dist
+          merge-multiple: true
+
+      # Outside a release there is no tag, so only the files and the two
+      # manifests are compared.
+      - name: Check versions
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: python dev-bin/check_release_version.py dist --tag "$RELEASE_TAG"
+
   upload_pypi:
     name: Publish to PyPI
-    needs: [build_wheels, build_sdist, build_wasm_wheels]
+    needs: [check_versions, test_musllinux_wheels, test_sdist, test_wheels]
     runs-on: ubuntu-latest
     if: github.event_name == 'release' && github.event.action == 'published'
     environment: pypi
