@@ -3,7 +3,9 @@ from __future__ import annotations
 import ipaddress
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -86,6 +88,85 @@ assert expected is not None
 with mock.patch("ipaddress.IPv4Address"):
     assert reader.get(real) == expected
 assert reader.get(real) == expected
+"""
+    subprocess.run(  # noqa: S603 - Fixed argument vector; no shell.
+        [sys.executable, "-c", code, str(DB_PATH)], check=True
+    )
+
+
+class _IPv4Subclass(ipaddress.IPv4Address):
+    pass
+
+
+class _IPv6Subclass(ipaddress.IPv6Address):
+    pass
+
+
+_Lookup = Callable[[maxminddb_rust.Reader, Any], Any]
+
+_LOOKUPS: dict[str, _Lookup] = {
+    "get": lambda reader, ip: reader.get(ip),
+    "get_with_prefix_len": lambda reader, ip: reader.get_with_prefix_len(ip),
+    "get_path": lambda reader, ip: reader.get_path(ip, ("country", "iso_code")),
+    "get_many": lambda reader, ip: reader.get_many([ip]),
+    "get_many_path": lambda reader, ip: reader.get_many_path(
+        [ip], ("country", "iso_code")
+    ),
+}
+
+
+@pytest.mark.parametrize("lookup", _LOOKUPS.values(), ids=_LOOKUPS.keys())
+@pytest.mark.parametrize(
+    ("make", "ip"),
+    [
+        (_IPv4Subclass, "81.2.69.142"),
+        (_IPv6Subclass, "2001:2b8::"),
+        (lambda ip: ipaddress.IPv4Interface(f"{ip}/24"), "81.2.69.142"),
+        (lambda ip: ipaddress.IPv6Interface(f"{ip}/64"), "2001:2b8::"),
+    ],
+    ids=[
+        "IPv4Address subclass",
+        "IPv6Address subclass",
+        "IPv4Interface",
+        "IPv6Interface",
+    ],
+)
+def test_lookups_accept_ip_address_subclasses(
+    lookup: _Lookup, make: Callable[[str], object], ip: str
+) -> None:
+    with maxminddb_rust.open_database(DB_PATH) as reader:
+        assert reader.get(ip) is not None
+        assert lookup(reader, make(ip)) == lookup(reader, ip)
+
+
+def test_get_ignores_cached_class_that_is_not_a_type() -> None:
+    # The address classes are cached on the first object lookup in the process,
+    # so patch ipaddress in a new interpreter.
+    code = """
+import ipaddress
+import sys
+from unittest import mock
+
+import maxminddb_rust
+
+class Sub(ipaddress.IPv4Address):
+    pass
+
+reader = maxminddb_rust.open_database(sys.argv[1])
+real = ipaddress.ip_address("81.2.69.142")
+sub = Sub("81.2.69.142")
+expected = reader.get("81.2.69.142")
+assert expected is not None
+with mock.patch("ipaddress.IPv4Address"):
+    assert reader.get(real) == expected
+# Known limitation: with a mock cached, subclasses match no cached class and
+# are rejected with the usual error rather than an error from the check.
+try:
+    reader.get(sub)
+except TypeError as err:
+    assert str(err) == "argument 1 must be a string or ipaddress object", err
+else:
+    raise AssertionError("expected TypeError")
 """
     subprocess.run(  # noqa: S603 - Fixed argument vector; no shell.
         [sys.executable, "-c", code, str(DB_PATH)], check=True

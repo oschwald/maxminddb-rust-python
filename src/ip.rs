@@ -2,16 +2,17 @@ use pyo3::{
     exceptions::{PyAttributeError, PyOverflowError, PyTypeError, PyValueError},
     prelude::*,
     sync::PyOnceLock,
-    types::{PyInt, PyString},
+    types::{PyInt, PyString, PyType},
 };
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 static IPADDRESS_TYPES: PyOnceLock<IpaddressTypes> = PyOnceLock::new();
 
-/// The `ipaddress` address classes, held for fast identity checks. They are
-/// fetched once per process. If a test has replaced a class at that point,
-/// even with a callable that is not a type, objects of the real class miss
-/// the identity check and take the name check in `parse_ip_address`.
+/// The `ipaddress` address classes, held for fast identity and subclass
+/// checks. They are fetched once per process. If a test has replaced a class
+/// at that point, even with a callable that is not a type, objects of the real
+/// class miss those checks and take the name check in `parse_ip_address`, and
+/// subclasses such as `IPv4Interface` are rejected.
 pub(crate) struct IpaddressTypes {
     pub(crate) ipv4_address: Py<PyAny>,
     pub(crate) ipv6_address: Py<PyAny>,
@@ -50,8 +51,17 @@ pub(crate) fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<IpAddr
         return extract_ipv6_object(ip_address);
     }
 
+    // Subclasses of the stdlib classes, such as `ipaddress.IPv4Interface`.
+    let ip_type = ip_address.get_type();
+    if is_subclass_of(&ip_type, &types.ipv4_address)? {
+        return extract_ipv4_object(ip_address);
+    }
+    if is_subclass_of(&ip_type, &types.ipv6_address)? {
+        return extract_ipv6_object(ip_address);
+    }
+
     // Slow path: other classes with the stdlib names, such as test doubles.
-    let type_name = ip_address.get_type().name()?;
+    let type_name = ip_type.name()?;
     let type_name_str = type_name.to_str()?;
     if type_name_str == "IPv4Address" {
         return extract_ipv4_object(ip_address);
@@ -63,6 +73,16 @@ pub(crate) fn parse_ip_address(ip_address: &Bound<'_, PyAny>) -> PyResult<IpAddr
     Err(PyTypeError::new_err(
         "argument 1 must be a string or ipaddress object",
     ))
+}
+
+/// Report whether `ip_type` is a subclass of a cached `ipaddress` class. The
+/// cached object may not be a type if a test replaced the class before it was
+/// cached, for example with a mock. Such an object matches nothing.
+fn is_subclass_of(ip_type: &Bound<'_, PyType>, cached: &Py<PyAny>) -> PyResult<bool> {
+    match cached.bind(ip_type.py()).cast::<PyType>() {
+        Ok(base) => ip_type.is_subclass(base),
+        Err(_) => Ok(false),
+    }
 }
 
 #[inline(always)]
