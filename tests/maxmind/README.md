@@ -107,6 +107,22 @@ from maxminddb_rust import (
 )
 ```
 
+Remove the upstream extension import and its fallback:
+
+```python
+try:
+    import maxminddb.extension
+except ImportError:
+    maxminddb.extension = None
+```
+
+If the official `maxminddb` package is installed, that import rebinds the
+`maxminddb` name to it, and later tests exercise the official reader instead of
+`maxminddb_rust`. Also remove `has_maxminddb_extension()`, which reads the
+attribute the import sets, and every use of it, such as the `skipIf` decorator
+on `TestExtensionReader`. The extension reader tests always run here.
+`TestModuleUnderTest` fails if the name is rebound.
+
 Update the `TYPE_CHECKING` import, if present:
 
 ```python

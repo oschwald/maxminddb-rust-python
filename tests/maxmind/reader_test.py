@@ -21,12 +21,6 @@ from typing import TYPE_CHECKING, cast
 from unittest import mock
 
 import maxminddb_rust as maxminddb
-
-try:
-    import maxminddb.extension
-except ImportError:
-    maxminddb.extension = None  # type: ignore[assignment]
-
 from maxminddb_rust import (
     MODE_AUTO,
     MODE_FD,
@@ -854,13 +848,6 @@ class BaseTestReader(unittest.TestCase):
             self.assertIsNone(reader.get(self.ipf(ip)))
 
 
-def has_maxminddb_extension() -> bool:
-    return maxminddb.extension is not None and hasattr(
-        maxminddb.extension,
-        "Reader",
-    )
-
-
 class TestExtensionReader(BaseTestReader):
     mode = MODE_MMAP_EXT
     reader_class = maxminddb.Reader
@@ -936,6 +923,18 @@ class TestOldReader(unittest.TestCase):
 
         self.assertEqual(record["array"], [1, 2, 3])
         reader.close()
+
+
+class TestModuleUnderTest(unittest.TestCase):
+    def test_maxminddb_is_maxminddb_rust(self) -> None:
+        # Upstream imports maxminddb.extension. That import rebinds the
+        # maxminddb name to the official package when it is installed, so
+        # these tests would silently exercise the wrong reader.
+        rust = sys.modules["maxminddb_rust"]
+        self.assertIs(maxminddb, rust)
+        for name in ("InvalidDatabaseError", "open_database"):
+            with self.subTest(name=name):
+                self.assertIs(globals()[name], getattr(rust, name))
 
 
 del BaseTestReader
