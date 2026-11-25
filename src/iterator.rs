@@ -1,5 +1,5 @@
 use crate::{
-    decode::PyDecodedValue,
+    decode::{take_decode_failure, PyDecodedValue},
     maxminddb_crate::{self, MaxMindDbError, Within, WithinOptions},
     InvalidDatabaseError, ReaderSource,
 };
@@ -94,9 +94,7 @@ impl ReaderIterator {
         };
         drop(iter);
         match next_item {
-            Some(result) => result
-                .map(Some)
-                .map_err(|err| InvalidDatabaseError::new_err(format!("Iteration error: {err}"))),
+            Some(result) => result.map(Some).map_err(|err| iteration_error(py, err)),
             None => Ok(None),
         }
     }
@@ -129,6 +127,21 @@ impl Drop for HeldLock {
 /// have left the iteration state half updated, so the iterator stops.
 fn poisoned_error() -> PyErr {
     PyRuntimeError::new_err("ReaderIterator cannot continue after an earlier panic")
+}
+
+/// Convert a failed iteration step to a Python exception. Like
+/// `Reader::lookup_error`, it keeps the Python error that stopped decoding,
+/// if one did, and raises a `MemoryError` as it is.
+#[cold]
+fn iteration_error(py: Python, err: MaxMindDbError) -> PyErr {
+    match take_decode_failure(py) {
+        Ok(py_cause) => {
+            let py_err = InvalidDatabaseError::new_err(format!("Iteration error: {err}"));
+            py_err.set_cause(py, py_cause);
+            py_err
+        }
+        Err(py_err) => py_err,
+    }
 }
 
 #[pymethods]

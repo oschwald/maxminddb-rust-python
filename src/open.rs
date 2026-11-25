@@ -1,6 +1,6 @@
 use crate::{InvalidDatabaseError, Reader, ReaderSource};
 use arc_swap::ArcSwapOption;
-use maxminddb::Reader as MaxMindReader;
+use maxminddb::{MaxMindDbError, Reader as MaxMindReader};
 use memmap2::Mmap;
 use pyo3::{exceptions::PyOSError, prelude::*};
 use std::{
@@ -73,17 +73,16 @@ fn create_reader(source: ReaderSource) -> Reader {
     }
 }
 
-#[inline]
-fn reader_from_source<S: AsRef<[u8]>>(
-    source_name: impl fmt::Display,
-    source: S,
-) -> PyResult<MaxMindReader<S>> {
-    MaxMindReader::from_source(source).map_err(|_| {
-        InvalidDatabaseError::new_err(format!(
-            "Error opening database file ({}). Is this a valid MaxMind DB file?",
-            source_name
-        ))
-    })
+/// Raise the official reader's error for a file that is not a valid
+/// MaxMind DB, with the Rust crate's own message as its `__cause__`.
+#[cold]
+fn open_error(py: Python, source_name: impl fmt::Display, err: MaxMindDbError) -> PyErr {
+    let py_err = InvalidDatabaseError::new_err(format!(
+        "Error opening database file ({}). Is this a valid MaxMind DB file?",
+        source_name
+    ));
+    py_err.set_cause(py, Some(InvalidDatabaseError::new_err(err.to_string())));
+    py_err
 }
 
 #[inline]
@@ -93,9 +92,8 @@ where
     S: AsRef<[u8]> + Send,
 {
     Python::attach(|py| {
-        py.detach(|| {
-            load_source(path).and_then(|source| reader_from_source(path.display(), source))
-        })
+        py.detach(|| load_source(path).map(MaxMindReader::from_source))?
+            .map_err(|err| open_error(py, path.display(), err))
     })
 }
 
@@ -127,7 +125,9 @@ pub(crate) fn open_database_fd(database: &Bound<'_, PyAny>) -> PyResult<Reader> 
     let filename = fd_database_name(database)?;
     let buffer = database.call_method0("read")?.extract::<Vec<u8>>()?;
     let py = database.py();
-    let reader = py.detach(move || reader_from_source(&filename, buffer))?;
+    let reader = py
+        .detach(move || MaxMindReader::from_source(buffer))
+        .map_err(|err| open_error(py, &filename, err))?;
 
     Ok(create_reader(ReaderSource::Memory(reader)))
 }
